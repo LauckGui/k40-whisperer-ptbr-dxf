@@ -14,6 +14,9 @@ for %%F in (*.py) do (
     if errorlevel 1 goto :erro
 )
 
+"%PYTHON_EXE%" -m unittest discover -s tests -v
+if errorlevel 1 goto :erro
+
 echo Verificacao local concluida sem acessar a maquina laser.
 popd
 exit /b 0

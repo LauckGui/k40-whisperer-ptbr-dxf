@@ -22,6 +22,11 @@ fixada para a futura integração do importador moderno. SVG e G-code existentes
 continuam preservados para compatibilidade; 3DM, DWG e novos formatos não fazem
 parte da etapa ativa.
 
+O pacote `k40core` contém o modelo canônico independente de interface e
+hardware. Toda geometria é normalizada para milímetros, enquanto unidade,
+camada, identificador, tipo e atributos originais permanecem rastreáveis. O
+modelo admite caminhos vetoriais e imagens raster posicionadas fisicamente.
+
 ## Verificação sem equipamento
 
 Os comandos abaixo não devem conectar nem enviar dados à máquina laser:

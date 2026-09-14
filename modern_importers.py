@@ -10,6 +10,10 @@ import os
 import subprocess
 import tempfile
 
+from k40core.importers.dxf import DxfImportError, import_dxf_document, probe_dxf_units as _probe_dxf_units
+from k40core.legacy import vector_lines_in_inches
+from k40core.model import Operation
+
 
 class ModernImporterFallback(Exception):
     """Indica que o leitor legado deve ser usado sem interromper a abertura."""
@@ -22,6 +26,7 @@ class ImportResult:
     bounds: tuple = (0.0, 0.0, 0.0, 0.0)
     warnings: list = field(default_factory=list)
     importer: str = ""
+    document: object = None
 
 
 def _is_blue(color):
@@ -62,63 +67,34 @@ def _bounds(cut, engrave):
 
 
 def probe_dxf_units(filename):
-    import ezdxf
-    from ezdxf import recover, units
-
-    try:
-        document = ezdxf.readfile(filename)
-    except ezdxf.DXFStructureError:
-        document, _ = recover.readfile(filename)
-    return units.unit_name(document.units)
+    return _probe_dxf_units(filename)
 
 
 def import_dxf(filename, tolerance_inches=0.0005, assumed_units=None):
-    import ezdxf
-    from ezdxf import recover, units
-    from ezdxf.addons.drawing.properties import RenderContext
-    from ezdxf.disassemble import recursive_decompose
-    from ezdxf.path import make_path
-
     try:
-        document = ezdxf.readfile(filename)
-        audit_messages = []
-    except ezdxf.DXFStructureError:
-        document, auditor = recover.readfile(filename)
-        audit_messages = [str(error) for error in auditor.errors]
+        document = import_dxf_document(
+            filename,
+            tolerance_mm=tolerance_inches * 25.4,
+            assumed_units=assumed_units,
+        )
+    except DxfImportError as exc:
+        raise ModernImporterFallback(str(exc)) from exc
 
-    unit_code = document.units
-    if unit_code == 0:
-        names = {
-            "Inches": 1, "Feet": 2, "Miles": 3, "Millimeters": 4,
-            "Centimeters": 5, "Meters": 6, "Kilometers": 7,
-            "Microinches": 8, "Mils": 9,
-        }
-        unit_code = names.get(assumed_units, 0)
-    if unit_code == 0:
-        raise ModernImporterFallback("O DXF não informa a unidade de medida.")
-
-    to_inches = units.conversion_factor(unit_code, units.IN)
-    tolerance_source = tolerance_inches / to_inches
-    context = RenderContext(document)
-    result = ImportResult(importer="ezdxf", warnings=audit_messages)
-    skipped = set()
-
-    for entity in recursive_decompose(document.modelspace()):
-        entity_type = entity.dxftype()
-        try:
-            path = make_path(entity)
-            properties = context.resolve_all(entity)
-            target = result.engrave if _is_blue(properties.color) else result.cut
-            _append_polyline(path.flattening(distance=tolerance_source, segments=4), target, to_inches)
-        except (TypeError, ValueError, AttributeError, NotImplementedError):
-            if entity_type not in {"POINT", "HATCH", "TEXT", "MTEXT", "ATTRIB", "ATTDEF"}:
-                skipped.add(entity_type)
-
-    if skipped:
-        result.warnings.append("Entidades não convertidas: " + ", ".join(sorted(skipped)))
-    if not result.cut and not result.engrave:
-        raise ModernImporterFallback("O leitor moderno não encontrou geometria vetorial utilizável.")
-    result.bounds = _bounds(result.cut, result.engrave)
+    result = ImportResult(
+        cut=vector_lines_in_inches(document, Operation.VECTOR_CUT),
+        engrave=vector_lines_in_inches(document, Operation.VECTOR_ENGRAVE),
+        warnings=[issue.message for issue in document.issues],
+        importer=document.source.importer,
+        document=document,
+    )
+    bounds = document.bounds
+    if bounds is not None:
+        result.bounds = (
+            bounds.min_x / 25.4,
+            bounds.max_x / 25.4,
+            bounds.min_y / 25.4,
+            bounds.max_y / 25.4,
+        )
     return result
 
 
