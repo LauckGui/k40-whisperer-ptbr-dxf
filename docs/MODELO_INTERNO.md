@@ -61,3 +61,10 @@ para a controladora Nano.
 4. Tratar blocos, inserções, transformações, layers ocultos e propriedades BYLAYER.
 5. Integrar o novo documento ao fluxo `Open_DXF`, mantendo fallback controlado.
 6. Comparar coordenadas e limites com o parser legado antes de torná-lo padrão.
+
+## Regressões DXF conhecidas
+
+O parser legado lia centros de círculos diretamente em OCS. Entidades com
+normal negativa no eixo Z eram posicionadas com o X invertido. O importador
+`ezdxf` aplica a transformação OCS → WCS e passou a ser usado primeiro pelo
+fluxo `Open_DXF`; o comportamento está protegido por teste automatizado.

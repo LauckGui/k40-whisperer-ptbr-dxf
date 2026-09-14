@@ -33,6 +33,7 @@ from interpolate import interpolate
 from ecoords import ECoord
 from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
+from modern_importers import ModernImporterFallback, import_dxf, probe_dxf_units
 
 import inkex
 import simplestyle
@@ -2756,6 +2757,34 @@ class Application(Frame):
         self.resetPath()
         
         self.DXF_FILE = filemname
+        try:
+            dxf_units = probe_dxf_units(self.DXF_FILE)
+            assumed_units = None
+            if not dxf_units or dxf_units == "Unitless":
+                dialog = UnitsDialog(root)
+                assumed_units = dialog.result
+                if not assumed_units:
+                    return
+
+            imported = import_dxf(
+                self.DXF_FILE,
+                tolerance_inches=.0005,
+                assumed_units=assumed_units,
+            )
+            self.VcutData.make_ecoords(imported.cut, scale=1.0)
+            self.VengData.make_ecoords(imported.engrave, scale=1.0)
+            self.Design_bounds = imported.bounds
+            if imported.warnings:
+                message_box("Importação de DXF:", "\n".join(imported.warnings))
+            return
+        except ModernImporterFallback:
+            # Compatibilidade temporária para arquivos que o novo leitor ainda
+            # não consegue representar com segurança.
+            pass
+        except Exception as exc:
+            msg = "O leitor DXF moderno falhou; tentando o leitor compatível.\n%s" % exc
+            debug_message(msg)
+
         dxf_import=DXF_CLASS()
         tolerance = .0005
         try:

@@ -85,6 +85,24 @@ class DxfImporterTests(unittest.TestCase):
         self.assertEqual(issue.source.entity_type, "POINT")
         self.assertEqual(issue.details["count"], 1)
 
+    def test_circle_with_negative_extrusion_is_converted_from_ocs_to_wcs(self):
+        path = self._path()
+        drawing = ezdxf.new("R12")
+        drawing.units = ezdxf.units.MM
+        drawing.modelspace().add_circle(
+            center=(-57.0, 5.0),
+            radius=60.0,
+            dxfattribs={"extrusion": (0.0, 0.0, -1.0)},
+        )
+        drawing.saveas(path)
+
+        document = import_dxf_document(path, assumed_units="Millimeters")
+        circle = next(item for item in document.vectors if item.source.entity_type == "CIRCLE")
+
+        self.assertAlmostEqual((circle.bounds.min_x + circle.bounds.max_x) / 2.0, 57.0)
+        self.assertAlmostEqual((circle.bounds.min_y + circle.bounds.max_y) / 2.0, 5.0)
+        self.assertAlmostEqual(circle.bounds.width, 120.0, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()
