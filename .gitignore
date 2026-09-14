@@ -1,0 +1,12 @@
+.venv*/
+__pycache__/
+*.py[cod]
+*.log
+build/
+dist/
+k40_whisperer.txt
+tools/libredwg/
+tools/libredwg-*.zip
+# Placeholder legado indisponível no OneDrive deste computador.
+README_Linux.txt
+README_MacOS.md
