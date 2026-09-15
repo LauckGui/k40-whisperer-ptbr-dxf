@@ -680,6 +680,7 @@ class Application(Frame):
         self.separator2 = Frame(self.master, height=1, bd=0, relief=FLAT, bg=separator_color)
         self.separator3 = Frame(self.master, height=1, bd=0, relief=FLAT, bg=separator_color)
         self.separator4 = Frame(self.master, height=1, bd=0, relief=FLAT, bg=separator_color)
+        self.separator5 = Frame(self.master, height=1, bd=0, relief=FLAT, bg=separator_color)
 
         #Speed
         self.Label_Reng_feed_u = Label(self.master,textvariable=self.funits, anchor=W)
@@ -5210,6 +5211,8 @@ class Application(Frame):
                 self.Array_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
+                    self.separator5.place(x=8, y=Yloc, width=334, height=1)
+                    Yloc=Yloc+6
                     self.Label_Position_Control.place(x=x_label_L, y=Yloc, width=w_label*2, height=21)
 
                     Yloc=Yloc+22
@@ -5268,6 +5271,7 @@ class Application(Frame):
                 else:
                     ###########################################################################
                     self.Label_Position_Control.place_forget()
+                    self.separator5.place_forget()
                     ##    
                     Yloc=Yloc+50
                     Yloc=Yloc+6
