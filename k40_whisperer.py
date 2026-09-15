@@ -218,6 +218,22 @@ class Application(Frame):
             draw.polygon(((p(12),p(1)),(p(8),p(6)),(p(16),p(6))), fill=color)
             draw.line((p(19),p(12),p(12),p(12)), fill=color, width=width)
             draw.polygon(((p(19),p(12)),(p(14),p(8)),(p(14),p(16))), fill=color)
+        elif name in ("mirror_horizontal", "mirror_vertical"):
+            # Duas formas refletidas e um eixo pontilhado, padrão visual de espelhamento.
+            if name == "mirror_horizontal":
+                draw.polygon(((p(2),p(5)),(p(9),p(9)),(p(9),p(15)),(p(2),p(19))),
+                             outline=color, width=width)
+                draw.polygon(((p(22),p(5)),(p(15),p(9)),(p(15),p(15)),(p(22),p(19))),
+                             outline=color, width=width)
+                for y in range(p(2), p(23), max(2, p(5))):
+                    draw.line((p(12),y,p(12),min(y+p(2),p(23))), fill=color, width=width)
+            else:
+                draw.polygon(((p(5),p(2)),(p(9),p(9)),(p(15),p(9)),(p(19),p(2))),
+                             outline=color, width=width)
+                draw.polygon(((p(5),p(22)),(p(9),p(15)),(p(15),p(15)),(p(19),p(22))),
+                             outline=color, width=width)
+                for x in range(p(2), p(23), max(2, p(5))):
+                    draw.line((x,p(12),min(x+p(2),p(23)),p(12)), fill=color, width=width)
         elif name == "preview":
             draw.rectangle((p(3),p(5),p(21),p(19)), outline=color, width=width)
             draw.polygon(((p(10),p(8)),(p(17),p(12)),(p(10),p(16))), fill=color)
@@ -852,6 +868,8 @@ class Application(Frame):
             "reload": self.make_ui_icon("reload", 20),
             "copies": self.make_ui_icon("copies", 20),
             "transform": self.make_ui_icon("transform", 20),
+            "mirror_horizontal": self.make_ui_icon("mirror_horizontal", 20),
+            "mirror_vertical": self.make_ui_icon("mirror_vertical", 20),
             "preview": self.make_ui_icon("preview", 18, "white"),
             "home": self.make_ui_icon("home", 20),
             "unlock": self.make_ui_icon("unlock", 20),
@@ -6567,8 +6585,8 @@ class Application(Frame):
 
         editor = Toplevel(self.master)
         editor.title("Editar desenho")
-        editor.geometry("510x300")
-        editor.minsize(510, 300)
+        editor.geometry("500x410")
+        editor.minsize(500, 410)
         editor.resizable(0, 0)
         editor.transient(self.master)
         editor.grab_set()
@@ -6587,34 +6605,41 @@ class Application(Frame):
         container = Frame(editor, padx=12, pady=10)
         container.pack(fill=BOTH, expand=1)
         Label(container, textvariable=summary, anchor=W).grid(
-            row=0, column=0, columnspan=5, sticky="ew", pady=(0, 2))
+            row=0, column=0, sticky="ew", pady=(0, 2))
         Label(container, textvariable=scale_preview, anchor=W, fg="#2563eb").grid(
-            row=1, column=0, columnspan=5, sticky="ew", pady=(0, 7))
-        container.columnconfigure(1, weight=1)
+            row=1, column=0, sticky="ew", pady=(0, 8))
+        container.columnconfigure(0, weight=1)
 
-        Label(container, image=self.ui_icons["transform"]).grid(row=2, column=0, rowspan=3, padx=(0, 4))
-        Label(container, text="Escala").grid(row=2, column=1, sticky=W)
-        Entry(container, textvariable=scale_percent, justify=RIGHT, width=9).grid(
-            row=2, column=2, sticky=W, padx=(4, 2))
-        Label(container, text="%").grid(row=2, column=3, sticky=W)
+        scale_frame = LabelFrame(container, text=" Escala e dimensões ", padx=10, pady=7)
+        scale_frame.grid(row=2, column=0, sticky="ew", pady=(0, 7))
+        scale_frame.columnconfigure(1, weight=1)
+        Label(scale_frame, image=self.ui_icons["transform"]).grid(
+            row=0, column=0, rowspan=3, padx=(0, 6))
+        Label(scale_frame, text="Escala").grid(row=0, column=1, sticky=W)
+        Entry(scale_frame, textvariable=scale_percent, justify=RIGHT, width=10).grid(
+            row=0, column=2, padx=(7, 3))
+        Label(scale_frame, text="%").grid(row=0, column=3, sticky=W)
+        Label(scale_frame, text="Largura").grid(row=1, column=1, sticky=W, pady=(3, 0))
+        Entry(scale_frame, textvariable=width_mm, justify=RIGHT, width=10).grid(
+            row=1, column=2, padx=(7, 3), pady=(3, 0))
+        Label(scale_frame, text="mm").grid(row=1, column=3, sticky=W, pady=(3, 0))
+        Label(scale_frame, text="Altura").grid(row=2, column=1, sticky=W, pady=(3, 0))
+        Entry(scale_frame, textvariable=height_mm, justify=RIGHT, width=10).grid(
+            row=2, column=2, padx=(7, 3), pady=(3, 0))
+        Label(scale_frame, text="mm").grid(row=2, column=3, sticky=W, pady=(3, 0))
 
-        Label(container, text="Largura").grid(row=3, column=1, sticky=W)
-        Entry(container, textvariable=width_mm, justify=RIGHT, width=9).grid(
-            row=3, column=2, sticky=W, padx=(4, 2))
-        Label(container, text="mm").grid(row=3, column=3, sticky=W)
+        rotation_frame = LabelFrame(container, text=" Rotação ", padx=10, pady=7)
+        rotation_frame.grid(row=3, column=0, sticky="ew", pady=(0, 7))
+        rotation_frame.columnconfigure(1, weight=1)
+        Label(rotation_frame, image=self.ui_icons["reload"]).grid(row=0, column=0, padx=(0, 6))
+        Label(rotation_frame, text="Ângulo").grid(row=0, column=1, sticky=W)
+        Entry(rotation_frame, textvariable=angle_degrees, justify=RIGHT, width=10).grid(
+            row=0, column=2, padx=(7, 3))
+        Label(rotation_frame, text="graus").grid(row=0, column=3, sticky=W)
 
-        Label(container, text="Altura").grid(row=4, column=1, sticky=W)
-        Entry(container, textvariable=height_mm, justify=RIGHT, width=9).grid(
-            row=4, column=2, sticky=W, padx=(4, 2))
-        Label(container, text="mm").grid(row=4, column=3, sticky=W)
-
-        Label(container, image=self.ui_icons["reload"]).grid(row=5, column=0, padx=(0, 4), pady=(7, 0))
-        Label(container, text="Rotação").grid(row=5, column=1, sticky=W, pady=(7, 0))
-        Entry(container, textvariable=angle_degrees, justify=RIGHT, width=9).grid(
-            row=5, column=2, sticky=W, padx=(4, 2), pady=(7, 0))
-        Label(container, text="graus").grid(row=5, column=3, sticky=W, pady=(7, 0))
-
-        Label(container, text="Espelhar").grid(row=6, column=1, sticky=W, pady=(8, 0))
+        mirror_frame = LabelFrame(container, text=" Espelhamento ", padx=10, pady=7)
+        mirror_frame.grid(row=4, column=0, sticky="ew", pady=(0, 7))
+        Label(mirror_frame, text="Refletir sobre o eixo:").grid(row=0, column=0, sticky=W)
 
         def source_center():
             current = editable_bounds(self.job_document)
@@ -6744,27 +6769,31 @@ class Application(Frame):
             if not started:
                 complete_edit(False)
 
-        scale_button = Button(container, text="Aplicar", image=self.ui_icons["transform"],
+        scale_button = Button(scale_frame, text="Aplicar", image=self.ui_icons["transform"],
                               compound=LEFT, command=apply_scale)
-        scale_button.grid(row=2, column=4, rowspan=3, sticky="ns", padx=(9, 0))
-        rotate_button = Button(container, text="Aplicar", image=self.ui_icons["reload"],
+        scale_button.grid(row=0, column=4, rowspan=3, sticky="ns", padx=(12, 0))
+        rotate_button = Button(rotation_frame, text="Aplicar", image=self.ui_icons["reload"],
                                compound=LEFT, command=apply_rotation)
-        rotate_button.grid(row=5, column=4, sticky="ew", padx=(9, 0), pady=(7, 0))
-        mirror_x_button = Button(container, text="Horizontal", image=self.ui_icons["left"],
+        rotate_button.grid(row=0, column=4, sticky="ew", padx=(12, 0))
+        mirror_x_button = Button(mirror_frame, text="Horizontal", image=self.ui_icons["mirror_horizontal"],
                                  compound=LEFT, command=lambda: apply_reflection(True))
-        mirror_x_button.grid(row=6, column=2, columnspan=2, sticky="w", padx=(4, 4), pady=(8, 0))
-        mirror_y_button = Button(container, text="Vertical", image=self.ui_icons["up"],
+        mirror_x_button.grid(row=0, column=1, sticky="ew", padx=(12, 5))
+        mirror_y_button = Button(mirror_frame, text="Vertical", image=self.ui_icons["mirror_vertical"],
                                  compound=LEFT, command=lambda: apply_reflection(False))
-        mirror_y_button.grid(row=6, column=4, sticky="ew", padx=(4, 0), pady=(8, 0))
+        mirror_y_button.grid(row=0, column=2, sticky="ew")
         action_buttons.extend((scale_button, rotate_button, mirror_x_button, mirror_y_button))
-        Label(container, text="Escala uniforme preserva círculos e arcos.", fg="#4b5563", anchor=W).grid(
-            row=7, column=0, columnspan=4, sticky="w", pady=(8, 0))
-        close_button = Button(container, text="Fechar", width=9, command=editor.destroy)
-        close_button.grid(
-            row=7, column=4, sticky=E, pady=(8, 0))
-        action_buttons.append(close_button)
+        footer = Frame(container)
+        footer.grid(row=5, column=0, sticky="ew", pady=(2, 0))
+        footer.columnconfigure(0, weight=1)
+        Label(footer, text="As ações são aplicadas imediatamente.", fg="#4b5563", anchor=W).grid(
+            row=0, column=0, sticky="w")
+        cancel_button = Button(footer, text="Cancelar", width=10, command=editor.destroy)
+        cancel_button.grid(row=0, column=1, padx=(6, 4))
+        ok_button = Button(footer, text="OK", width=10, command=editor.destroy)
+        ok_button.grid(row=0, column=2)
+        action_buttons.extend((cancel_button, ok_button))
         Label(container, textvariable=message, fg="#b42318", anchor=W).grid(
-            row=8, column=0, columnspan=5, sticky="ew")
+            row=6, column=0, sticky="ew")
         trace_variable(scale_percent, sync_from_percent)
         trace_variable(width_mm, sync_from_width)
         trace_variable(height_mm, sync_from_height)
