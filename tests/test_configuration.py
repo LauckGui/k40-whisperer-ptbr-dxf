@@ -3,7 +3,8 @@ import os
 import tempfile
 import unittest
 
-from k40core.configuration import ConfigurationError, load_configuration, save_configuration
+from k40core.configuration import (ConfigurationError, configuration_path,
+                                   load_configuration, save_configuration)
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -21,6 +22,18 @@ class ConfigurationTests(unittest.TestCase):
                 json.dump({"schema_version": 99, "settings": {}}, stream)
             with self.assertRaises(ConfigurationError):
                 load_configuration(path)
+
+    def test_installed_application_uses_local_app_data(self):
+        path = configuration_path(
+            r"C:\Program Files\K40 Whisperer\k40_whisperer.py",
+            frozen=True,
+            environment={"LOCALAPPDATA": r"C:\Users\Test\AppData\Local"},
+        )
+        self.assertEqual(
+            path,
+            os.path.join(r"C:\Users\Test\AppData\Local", "K40 Whisperer",
+                         "k40_whisperer.config.json"),
+        )
 
 
 if __name__ == "__main__":

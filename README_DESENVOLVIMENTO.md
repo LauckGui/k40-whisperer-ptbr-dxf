@@ -37,3 +37,21 @@ Verificar_Ambiente.bat
 
 Antes de qualquer teste físico, devem existir testes de caracterização do DXF
 e um modo de execução que garanta que USB não será acessado.
+
+## Instalador para Windows
+
+O empacotamento não depende de Python no computador de destino. O PyInstaller
+gera a aplicação e o Inno Setup cria o instalador tradicional com atalhos e
+desinstalador.
+
+1. Instale o Inno Setup 6 uma vez no computador de desenvolvimento:
+   `winget install --id JRSoftware.InnoSetup -e`
+2. Execute `Construir_Instalador.bat`.
+3. O resultado será criado em `dist\installer`.
+
+O script instala a versão fixada do PyInstaller no ambiente virtual local,
+executa todos os testes e interrompe o build se qualquer teste falhar.
+
+O instalador empacota a aplicação, mas não altera o driver USB da controladora.
+O computador de destino ainda precisa ter um driver libUSB compatível com a
+placa K40, como já ocorre na distribuição padrão do K40 Whisperer.

@@ -12,6 +12,16 @@ class ConfigurationError(ValueError):
     pass
 
 
+def configuration_path(source_file, frozen=False, environment=None):
+    """Choose a writable, upgrade-safe location for application settings."""
+    environment = os.environ if environment is None else environment
+    if frozen:
+        base = environment.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "K40 Whisperer", "k40_whisperer.config.json")
+    return os.path.join(os.path.dirname(os.path.abspath(source_file)),
+                        "k40_whisperer.config.json")
+
+
 def load_configuration(path):
     with open(path, "r", encoding="utf-8") as stream:
         payload = json.load(stream)

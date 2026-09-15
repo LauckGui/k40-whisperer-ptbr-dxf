@@ -33,7 +33,8 @@ from ecoords import ECoord
 from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
-from k40core.configuration import ConfigurationError, load_configuration, save_configuration
+from k40core.configuration import (ConfigurationError, configuration_path,
+                                   load_configuration, save_configuration)
 from k40core.coordinates import display_y, origin_for_reference
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
@@ -1093,8 +1094,9 @@ class Application(Frame):
         ##########################################################################
         #                  Config File and command line options                  #
         ##########################################################################
-        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                        "k40_whisperer.config.json")
+        self.config_path = configuration_path(
+            __file__, frozen=bool(getattr(sys, "frozen", False))
+        )
         self._config_save_after = None
         self._config_ready = False
         self._factory_configuration = self._configuration_values()
@@ -7894,6 +7896,7 @@ if LOAD_MSG != "":
     message_box("K40 Whisperer",LOAD_MSG)
 
 opts, args = None, None
+pi_mode_requested = False
 try:
     opts, args = getopt.getopt(sys.argv[1:], "hpd",["help", "pi", "debug"])
 except:
@@ -7909,6 +7912,8 @@ for option, value in opts:
         sys.exit()
     elif option in ('-p','--pi'):
         print("pi mode")
+        pi_mode_requested = True
+        app.master.state("normal")
         app.master.minsize(222,280)
         app.master.geometry("480x320")
     elif option in ('-d','--debug'):
@@ -7917,5 +7922,16 @@ for option, value in opts:
 if DEBUG:
     import inspect
 debug_message("Debuging is turned on.")
+
+if not pi_mode_requested:
+    def maximize_main_window():
+        try:
+            app.master.state("zoomed")
+        except TclError:
+            try:
+                app.master.attributes("-zoomed", True)
+            except TclError:
+                pass
+    app.master.after_idle(maximize_main_window)
     
 root.mainloop()
