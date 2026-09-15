@@ -131,6 +131,8 @@ class Application(Frame):
         self.dxf_import_queue = None
         self.dxf_import_cancel = None
         self.dxf_progress_indeterminate = False
+        self.preview_render_generation = 0
+        self.preview_line_buffer = None
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -2804,7 +2806,19 @@ class Application(Frame):
                     unit_resolver=lambda: request_from_ui("units"),
                     projection_resolver=lambda: request_from_ui("projection"),
                 )
-                self.dxf_import_queue.put(("complete", (filemname, imported)))
+                # ECoord is independent from Tk, so the potentially expensive
+                # legacy conversion belongs in the worker too.
+                from k40core.importing import ImportProgress
+                self.dxf_import_queue.put(("progress", ImportProgress(
+                    "legacy", message="Preparando geometrias para a interface..."
+                )))
+                vcut_data = ECoord()
+                veng_data = ECoord()
+                vcut_data.make_ecoords(imported.cut, scale=1.0)
+                veng_data.make_ecoords(imported.engrave, scale=1.0)
+                self.dxf_import_queue.put(
+                    ("complete", (filemname, imported, vcut_data, veng_data))
+                )
             except Exception as exc:
                 from k40core.importing import ImportCancelled
                 event = "cancelled" if isinstance(exc, ImportCancelled) else "error"
@@ -2848,17 +2862,17 @@ class Application(Frame):
                     payload["value"] = dialog.result
                     payload["event"].set()
                 elif event == "complete":
-                    filename, imported = payload
+                    filename, imported, vcut_data, veng_data = payload
                     self.resetPath()
                     self.DXF_FILE = filename
                     self.DESIGN_FILE = filename
-                    self.VcutData.make_ecoords(imported.cut, scale=1.0)
-                    self.VengData.make_ecoords(imported.engrave, scale=1.0)
+                    self.VcutData = vcut_data
+                    self.VengData = veng_data
                     self.Design_bounds = imported.bounds
                     self.set_gui("normal")
                     self.statusbar.configure(bg='white')
                     self.statusMessage.set("DXF importado: %d objetos" % len(imported.document.vectors))
-                    self.menu_View_Refresh()
+                    self.menu_View_Refresh(incremental=True)
                     if imported.warnings:
                         message_box("Importação de DXF:", "\n".join(imported.warnings))
                     terminal = True
@@ -4617,7 +4631,7 @@ class Application(Frame):
             calframe = inspect.getouterframes(curframe, 2)
             print('menu_View_Refresh_Callback called by: %s' %(calframe[1][3]))
 
-    def menu_View_Refresh(self):
+    def menu_View_Refresh(self, incremental=False):
         if DEBUG:
             curframe = inspect.currentframe()
             calframe = inspect.getouterframes(curframe, 2)
@@ -4630,7 +4644,7 @@ class Application(Frame):
         dummy_event = Event()
         dummy_event.widget=self.master
         self.Master_Configure(dummy_event,1)
-        self.Plot_Data()
+        self.Plot_Data(incremental=incremental)
         xmin,xmax,ymin,ymax = self.Get_Design_Bounds()
         W = xmax-xmin
         H = ymax-ymin
@@ -5396,7 +5410,10 @@ class Application(Frame):
     ##########################################
     #        CANVAS PLOTTING STUFF           #
     ##########################################
-    def Plot_Data(self):
+    def Plot_Data(self, incremental=False):
+        self.preview_render_generation += 1
+        render_generation = self.preview_render_generation
+        self.preview_line_buffer = [] if incremental else None
         self.PreviewCanvas.delete(ALL)
         self.calc_button.place_forget()
 
@@ -5539,6 +5556,8 @@ class Application(Frame):
             if self.mirror.get() or self.rotate.get():
                 plot_coords = self.mirror_rotate_vector_coords(plot_coords)
 
+            preview_stride = self._preview_stride(plot_coords)
+            preview_index = 0
             for line in plot_coords:
                 XY    = line
                 x1    = (XY[0]-xmin)
@@ -5546,7 +5565,9 @@ class Application(Frame):
                 loop  = XY[2]
                 # check and see if we need to move to a new discontinuous start point
                 if (loop == loop_old):
-                    self.Plot_Line(xold, yold, x1, y1, x_lft, y_top, XlineShift, YlineShift, self.PlotScale, "blue")
+                    if preview_index % preview_stride == 0:
+                        self.Plot_Line(xold, yold, x1, y1, x_lft, y_top, XlineShift, YlineShift, self.PlotScale, "blue")
+                    preview_index += 1
                 loop_old = loop
                 xold=x1
                 yold=y1
@@ -5561,6 +5582,8 @@ class Application(Frame):
             if self.mirror.get() or self.rotate.get():
                     plot_coords = self.mirror_rotate_vector_coords(plot_coords)
                 
+            preview_stride = self._preview_stride(plot_coords)
+            preview_index = 0
             for line in plot_coords:
                 XY    = line
                 x1    = (XY[0]-xmin)
@@ -5568,7 +5591,9 @@ class Application(Frame):
                 loop  = XY[2]
                 # check and see if we need to move to a new discontinuous start point
                 if (loop == loop_old):
-                    self.Plot_Line(xold, yold, x1, y1, x_lft, y_top, XlineShift, YlineShift, self.PlotScale, "red")
+                    if preview_index % preview_stride == 0:
+                        self.Plot_Line(xold, yold, x1, y1, x_lft, y_top, XlineShift, YlineShift, self.PlotScale, "red")
+                    preview_index += 1
                 loop_old = loop
                 xold=x1
                 yold=y1
@@ -5640,6 +5665,44 @@ class Application(Frame):
             head_offset=False
         
         self.Plot_circle(self.laserX+xoff,self.laserY+yoff,x_lft,y_top,self.PlotScale,dot_col,radius=5,cross_hair=head_offset)
+
+        if self.preview_line_buffer is not None:
+            pending = self.preview_line_buffer
+            self.preview_line_buffer = None
+            self._render_preview_lines(pending, render_generation)
+
+    def _preview_stride(self, ecoords, maximum_segments=4000):
+        """Limit only Canvas detail; source ECoords always remain complete."""
+        return max(1, int(math.ceil(max(0, len(ecoords) - 1) / float(maximum_segments))))
+
+    def _render_preview_lines(self, pending, generation, start=0, batch_size=200):
+        if generation != self.preview_render_generation:
+            return
+
+        if start == 0 and pending:
+            self.import_progress.configure(
+                mode="determinate", maximum=len(pending), value=0
+            )
+            self.import_progress.pack(anchor=SW, fill=X, side=BOTTOM, padx=2, pady=(1, 0))
+
+        end = min(start + batch_size, len(pending))
+        for line_args, line_options in pending[start:end]:
+            self.segID.append(
+                self.PreviewCanvas.create_line(*line_args, **line_options)
+            )
+        if pending:
+            self.import_progress["value"] = end
+
+        if end < len(pending):
+            self.statusMessage.set(
+                "Montando prévia... %d%%" % int(100.0 * end / len(pending))
+            )
+            self.master.after(
+                1, lambda: self._render_preview_lines(pending, generation, end, batch_size)
+            )
+        else:
+            self.import_progress.pack_forget()
+            self.statusMessage.set("DXF importado; prévia pronta.")
         
     def Plot_Raster(self, XX, YY, Xleft, Ytop, PlotScale, im):
         if (self.HomeUR.get()):
@@ -5739,12 +5802,12 @@ class Application(Frame):
         yplt1 = Ytop  - (YY1 + YlineShift )/PlotScale
         yplt2 = Ytop  - (YY2 + YlineShift )/PlotScale
         
-        self.segID.append(
-            self.PreviewCanvas.create_line( xplt1,
-                                            yplt1,
-                                            xplt2,
-                                            yplt2,
-                                            fill=col, capstyle="round", width = thick, tags=tag_value) )
+        line_args = (xplt1, yplt1, xplt2, yplt2)
+        line_options = {"fill": col, "capstyle": "round", "width": thick, "tags": tag_value}
+        if self.preview_line_buffer is not None:
+            self.preview_line_buffer.append((line_args, line_options))
+        else:
+            self.segID.append(self.PreviewCanvas.create_line(*line_args, **line_options))
         
     ################################################################################
     #                         Temporary Move Window                                #
