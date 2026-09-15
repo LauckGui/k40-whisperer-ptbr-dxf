@@ -4,6 +4,7 @@ from k40core.model import (
     AffineTransform,
     ArcSegment,
     Bounds,
+    FillObject,
     ImportSource,
     JobDocument,
     Layer,
@@ -71,6 +72,24 @@ class JobModelTests(unittest.TestCase):
         path = VectorPath((arc,))
 
         self.assertEqual(path.bounds, Bounds(-10, -10, 10, 10))
+
+    def test_fill_participates_in_bounds_operations_and_validation(self):
+        layer = Layer("layer:0", "Preenchimento")
+        path = VectorPath((
+            LineSegment(Point(2, 3), Point(12, 3)),
+            LineSegment(Point(12, 3), Point(12, 8)),
+            LineSegment(Point(12, 8), Point(2, 3)),
+        ), closed=True)
+        fill = FillObject("fill:1", (path,), layer.id)
+        document = JobDocument(
+            ImportSource("fill.dxf", "dxf", "fixture"),
+            layers=[layer], fills=[fill],
+        )
+
+        document.validate()
+
+        self.assertEqual(document.bounds, Bounds(2, 3, 12, 8))
+        self.assertEqual(document.objects_for_operation(Operation.RASTER_ENGRAVE), [fill])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from .model import (
     Bounds,
     Color,
     CubicBezierSegment,
+    FillObject,
     ImportIssue,
     ImportSource,
     IssueSeverity,
@@ -21,5 +22,7 @@ from .model import (
     VectorPath,
     VectorStyle,
 )
+from .rasterizer import RasterizationError, rasterize_fills
+from .topology import stitch_line_segments
 
 __all__ = [name for name in globals() if not name.startswith("_")]

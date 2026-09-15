@@ -9,6 +9,7 @@ from k40core.importing import ImportCancelled, check_cancelled, report_progress
 
 from k40core.model import (
     Color,
+    FillObject,
     ImportIssue,
     ImportSource,
     IssueSeverity,
@@ -23,6 +24,26 @@ from k40core.model import (
     VectorPath,
     VectorStyle,
 )
+
+
+_FILL_ENTITY_TYPES = {"HATCH", "SOLID", "TRACE"}
+
+
+def _flatten_entity_paths(entity, tolerance_source):
+    """Return one or more WCS point sequences for paths or filled entities."""
+    from ezdxf.path import from_hatch, make_path
+
+    entity_type = entity.dxftype()
+    if entity_type == "HATCH":
+        return [tuple(path.flattening(distance=tolerance_source, segments=4))
+                for path in from_hatch(entity)]
+    if entity_type in {"SOLID", "TRACE"}:
+        vertices = list(entity.wcs_vertices())
+        if vertices and vertices[-1] != vertices[0]:
+            vertices.append(vertices[0])
+        return [tuple(vertices)]
+    path = make_path(entity)
+    return [tuple(path.flattening(distance=tolerance_source, segments=4))]
 
 
 class DxfImportError(Exception):
@@ -164,7 +185,6 @@ def import_dxf_document(
     from ezdxf import units
     from ezdxf.addons.drawing.properties import RenderContext
     from ezdxf.disassemble import recursive_decompose
-    from ezdxf.path import make_path
 
     document, audit_messages = _read_document(filename, progress, cancelled)
     unit_code = document.units
@@ -209,25 +229,23 @@ def import_dxf_document(
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
         check_cancelled(cancelled)
         entity_type = entity.dxftype()
-        path = None
-        flattened = None
+        flattened_paths = None
         try:
-            path = make_path(entity)
-            flattened = tuple(path.flattening(distance=tolerance_source, segments=4))
-            if len(flattened) < 2:
+            flattened_paths = _flatten_entity_paths(entity, tolerance_source)
+            if not any(len(item) >= 2 for item in flattened_paths):
                 continue
             analyzable += 1
-            for point in flattened:
-                for axis in range(3):
-                    value = float(point[axis])
-                    coordinate_ranges[axis][0] = min(coordinate_ranges[axis][0], value)
-                    coordinate_ranges[axis][1] = max(coordinate_ranges[axis][1], value)
+            for flattened in flattened_paths:
+                for point in flattened:
+                    for axis in range(3):
+                        value = float(point[axis])
+                        coordinate_ranges[axis][0] = min(coordinate_ranges[axis][0], value)
+                        coordinate_ranges[axis][1] = max(coordinate_ranges[axis][1], value)
         except (TypeError, ValueError, AttributeError, NotImplementedError):
             pass
         if index % progress_batch == 0:
             report_progress(progress, "analyzing", index, message=f"{index} entidades analisadas...")
-        path = None
-        flattened = None
+        flattened_paths = None
         del entity
 
     if not analyzable:
@@ -265,8 +283,7 @@ def import_dxf_document(
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
         check_cancelled(cancelled)
         entity_type = entity.dxftype()
-        path = None
-        flattened = None
+        flattened_paths = None
         points = None
         segments = None
         layer_name = _effective_layer_name(entity)
@@ -293,8 +310,48 @@ def import_dxf_document(
             layer_name=layer_name,
         )
         try:
-            path = make_path(entity)
-            flattened = tuple(path.flattening(distance=tolerance_source, segments=4))
+            flattened_paths = _flatten_entity_paths(entity, tolerance_source)
+            flattened = flattened_paths[0] if flattened_paths else ()
+            if entity_type in _FILL_ENTITY_TYPES:
+                fill_paths = []
+                for source_points in flattened_paths:
+                    points = tuple(_project_point(point, projection, to_mm)
+                                   for point in source_points)
+                    segments = tuple(
+                        LineSegment(start, end)
+                        for start, end in zip(points, points[1:])
+                        if start != end
+                    )
+                    if segments:
+                        fill_paths.append(VectorPath(segments=segments, closed=True))
+                if not fill_paths:
+                    skipped[entity_type] += 1
+                    continue
+                color = _effective_color(entity, document, context, layer_name)
+                object_id = f"dxf:{handle}:{index}" if handle is not None else f"dxf:index:{index}"
+                result.fills.append(FillObject(
+                    id=object_id,
+                    paths=tuple(fill_paths),
+                    layer_id=layer_id,
+                    color=color,
+                    fill_rule="even_odd" if entity_type == "HATCH" else "union",
+                    source=reference,
+                    metadata={
+                        "source_entity": entity_type,
+                        "solid_fill": bool(getattr(entity.dxf, "solid_fill", True)),
+                        "pattern_name": getattr(entity.dxf, "pattern_name", None),
+                        "flattening_tolerance_mm": tolerance_mm,
+                    },
+                ))
+                converted += 1
+                if index % progress_batch == 0:
+                    report_progress(
+                        progress, "converting", converted, analyzable,
+                        message=f"{converted} de {analyzable} objetos convertidos...",
+                    )
+                flattened_paths = None
+                del entity
+                continue
             points = tuple(_project_point(point, projection, to_mm) for point in flattened)
             segments = tuple(LineSegment(start, end) for start, end in zip(points, points[1:]) if start != end)
             if not segments:
@@ -309,7 +366,7 @@ def import_dxf_document(
             result.vectors.append(
                 VectorObject(
                     id=object_id,
-                    paths=(VectorPath(segments=segments, closed=bool(getattr(path, "is_closed", False))),),
+                    paths=(VectorPath(segments=segments, closed=points[0] == points[-1]),),
                     layer_id=layer_id,
                     operation=operation,
                     style=VectorStyle(stroke=color, visible=visible),
@@ -328,8 +385,7 @@ def import_dxf_document(
                 analyzable,
                 message=f"{converted} de {analyzable} objetos convertidos...",
             )
-        path = None
-        flattened = None
+        flattened_paths = None
         points = None
         segments = None
         del entity
@@ -344,8 +400,8 @@ def import_dxf_document(
                 details={"count": count},
             )
         )
-    if not result.vectors:
-        raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
+    if not result.vectors and not result.fills:
+        raise DxfImportError("O DXF não contém geometria utilizável.")
     result.validate()
     report_progress(progress, "complete", analyzable, analyzable, f"{converted} objetos DXF convertidos.")
     return result

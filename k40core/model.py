@@ -301,6 +301,37 @@ class RasterObject:
 
 
 @dataclass(frozen=True)
+class FillObject:
+    """Resolution-independent filled regions such as DXF HATCH/SOLID."""
+
+    id: str
+    paths: tuple[VectorPath, ...]
+    layer_id: str
+    operation: Operation = Operation.RASTER_ENGRAVE
+    color: Optional[Color] = None
+    fill_rule: str = "even_odd"
+    transform: AffineTransform = field(default_factory=AffineTransform)
+    source: SourceReference = field(default_factory=SourceReference)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.paths:
+            raise ValueError("Um preenchimento precisa ter ao menos um contorno.")
+        if self.fill_rule not in {"even_odd", "nonzero", "union"}:
+            raise ValueError("Regra de preenchimento inválida.")
+
+    @property
+    def bounds(self) -> Optional[Bounds]:
+        points = (
+            self.transform.apply(point)
+            for path in self.paths
+            for segment in path.segments
+            for point in segment.points
+        )
+        return Bounds.from_points(points)
+
+
+@dataclass(frozen=True)
 class ImportSource:
     path: str
     format: str
@@ -325,6 +356,7 @@ class JobDocument:
     layers: list[Layer] = field(default_factory=list)
     vectors: list[VectorObject] = field(default_factory=list)
     rasters: list[RasterObject] = field(default_factory=list)
+    fills: list[FillObject] = field(default_factory=list)
     issues: list[ImportIssue] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 1
@@ -332,7 +364,11 @@ class JobDocument:
 
     @property
     def bounds(self) -> Optional[Bounds]:
-        return Bounds.union([item.bounds for item in self.vectors] + [item.bounds for item in self.rasters])
+        return Bounds.union(
+            [item.bounds for item in self.vectors]
+            + [item.bounds for item in self.rasters]
+            + [item.bounds for item in self.fills]
+        )
 
     def validate(self) -> None:
         if self.schema_version < 1:
@@ -342,13 +378,17 @@ class JobDocument:
         layer_ids = [layer.id for layer in self.layers]
         if len(layer_ids) != len(set(layer_ids)):
             raise ValueError("IDs de camada duplicados.")
-        object_ids = [item.id for item in self.vectors] + [item.id for item in self.rasters]
+        object_ids = (
+            [item.id for item in self.vectors]
+            + [item.id for item in self.rasters]
+            + [item.id for item in self.fills]
+        )
         if len(object_ids) != len(set(object_ids)):
             raise ValueError("IDs de objeto duplicados.")
         known_layers = set(layer_ids)
-        for item in [*self.vectors, *self.rasters]:
+        for item in [*self.vectors, *self.rasters, *self.fills]:
             if item.layer_id not in known_layers:
                 raise ValueError(f"Objeto {item.id!r} referencia uma camada inexistente.")
 
-    def objects_for_operation(self, operation: Operation) -> list[Union[VectorObject, RasterObject]]:
-        return [item for item in [*self.vectors, *self.rasters] if item.operation is operation]
+    def objects_for_operation(self, operation: Operation) -> list[Union[VectorObject, RasterObject, FillObject]]:
+        return [item for item in [*self.vectors, *self.rasters, *self.fills] if item.operation is operation]

@@ -13,6 +13,8 @@ import tempfile
 from k40core.importers.dxf import DxfImportError, import_dxf_document, probe_dxf_units as _probe_dxf_units
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Operation
+from k40core.rasterizer import rasterize_fills
+from k40core.importing import ImportProgress
 
 
 class ModernImporterFallback(Exception):
@@ -27,6 +29,8 @@ class ImportResult:
     warnings: list = field(default_factory=list)
     importer: str = ""
     document: object = None
+    raster_image: object = None
+    raster_dpi: float = 0.0
 
 
 def _is_blue(color):
@@ -79,6 +83,7 @@ def import_dxf(
     cancelled=None,
     unit_resolver=None,
     projection_resolver=None,
+    raster_dpi=None,
 ):
     document = import_dxf_document(
         filename,
@@ -98,9 +103,17 @@ def import_dxf(
         importer=document.source.importer,
         document=document,
     )
-    if not result.cut and not result.engrave:
+    if raster_dpi and document.fills:
+        if progress is not None:
+            progress(ImportProgress("rasterizing", message="Rasterizando preenchimentos DXF..."))
+        result.raster_image = rasterize_fills(document, raster_dpi)
+        result.raster_dpi = float(raster_dpi)
+    if not result.cut and not result.engrave and result.raster_image is None:
         raise DxfImportError("O DXF não contém geometria visível para corte ou gravação.")
-    result.bounds = _bounds(result.cut, result.engrave)
+    bounds = document.bounds
+    result.bounds = ((bounds.min_x/25.4, bounds.max_x/25.4,
+                      bounds.min_y/25.4, bounds.max_y/25.4)
+                     if bounds is not None else _bounds(result.cut, result.engrave))
     return result
 
 

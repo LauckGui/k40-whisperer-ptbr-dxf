@@ -30,6 +30,12 @@ o objeto.
 
 ## Raster
 
+`FillObject` representa preenchimentos independentes de resolução. Ele mantém
+os contornos, furos, transformação, camada, cor e regra de preenchimento de
+entidades como DXF `HATCH`, `SOLID` e `TRACE`. O rasterizador interno converte
+esses objetos sob demanda; divisões de uma malha de faces não se tornam linhas
+de corte.
+
 `RasterObject` registra:
 
 - largura e altura em pixels;
@@ -40,11 +46,19 @@ o objeto.
 - transformação para posicionamento, escala, rotação e espelhamento;
 - operação e referência ao objeto de origem.
 
-Os pixels ainda não são decodificados ou rasterizados pelo núcleo. Essa escolha
-permite adotar Pillow, CairoSVG ou outro backend posteriormente, mantendo o
-documento e os testes estáveis. O futuro pipeline deverá separar decodificação,
-composição, conversão para escala de cinza, dithering e geração das linhas de
-varredura.
+O primeiro backend Pillow já compõe preenchimentos sólidos em uma imagem
+monocromática, incluindo ilhas pela regra par/ímpar. A resolução da imagem de
+trabalho é independente do número de passadas; o passo configurado seleciona
+as linhas de varredura posteriormente. Padrões e gradientes ainda precisam de
+backends próprios.
+
+## Topologia e rotas
+
+O adaptador legado reconstrói caminhos a partir de linhas explodidas usando um
+índice espacial de extremidades. A busca é aproximadamente linear, aceita a
+tolerância numérica de exportação, pode inverter segmentos e identifica
+caminhos fechados. Camada, cor e operação delimitam os grupos que podem ser
+unidos, evitando conectar processos diferentes.
 
 ## Compatibilidade legada
 

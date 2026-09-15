@@ -248,6 +248,40 @@ class DxfImporterTests(unittest.TestCase):
                 cancelled=lambda: state["cancelled"],
             )
 
+    def test_solid_is_imported_as_fill_instead_of_vector_edges(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        drawing.modelspace().add_solid([(0, 0), (10, 0), (0, 10), (10, 10)])
+        drawing.saveas(path)
+
+        document = import_dxf_document(path)
+
+        self.assertEqual(document.vectors, [])
+        self.assertEqual(len(document.fills), 1)
+        self.assertEqual(document.fills[0].source.entity_type, "SOLID")
+        self.assertEqual(document.fills[0].operation, Operation.RASTER_ENGRAVE)
+
+    def test_hatch_with_hole_rasterizes_without_inkscape(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        hatch = drawing.modelspace().add_hatch(color=1)
+        hatch.paths.add_polyline_path(
+            [(0, 0), (10, 0), (10, 10), (0, 10)], is_closed=True,
+        )
+        hatch.paths.add_polyline_path(
+            [(3, 3), (7, 3), (7, 7), (3, 7)], is_closed=True,
+        )
+        drawing.saveas(path)
+
+        result = import_dxf(path, raster_dpi=254)
+
+        self.assertEqual(len(result.document.fills), 1)
+        self.assertIsNotNone(result.raster_image)
+        self.assertEqual(result.raster_image.getpixel((10, 10)), 0)
+        self.assertEqual(result.raster_image.getpixel((50, 50)), 255)
+
 
 if __name__ == "__main__":
     unittest.main()

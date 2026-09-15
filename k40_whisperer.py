@@ -2805,6 +2805,10 @@ class Application(Frame):
         self.import_progress.pack(anchor=SW, fill=X, side=BOTTOM, padx=2, pady=(1, 0))
         self.import_progress.start(12)
         self.dxf_progress_indeterminate = True
+        # Keep a resolution-independent working source, as already done for
+        # SVG. The configured raster step selects scanlines later and remains
+        # independent from the number of passes.
+        raster_dpi = 500.0 if self.reduced_mem.get() else 1000.0
 
         def request_from_ui(kind):
             request = {"kind": kind, "event": threading.Event(), "value": None}
@@ -2824,6 +2828,7 @@ class Application(Frame):
                     cancelled=self.dxf_import_cancel.is_set,
                     unit_resolver=lambda: request_from_ui("units"),
                     projection_resolver=lambda: request_from_ui("projection"),
+                    raster_dpi=raster_dpi,
                 )
                 # ECoord is independent from Tk, so the potentially expensive
                 # legacy conversion belongs in the worker too.
@@ -2887,10 +2892,16 @@ class Application(Frame):
                     self.DESIGN_FILE = filename
                     self.VcutData = vcut_data
                     self.VengData = veng_data
+                    if imported.raster_image is not None:
+                        self.RengData.set_image(imported.raster_image)
+                        self.input_dpi = imported.raster_dpi
+                        self.wim, self.him = imported.raster_image.size
+                        self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
                     self.Design_bounds = imported.bounds
                     self.set_gui("normal")
                     self.statusbar.configure(bg='white')
-                    self.statusMessage.set("DXF importado: %d objetos" % len(imported.document.vectors))
+                    object_count = len(imported.document.vectors) + len(imported.document.fills)
+                    self.statusMessage.set("DXF importado: %d objetos" % object_count)
                     self.menu_View_Refresh(incremental=True)
                     if imported.warnings:
                         message_box("Importação de DXF:", "\n".join(imported.warnings))
