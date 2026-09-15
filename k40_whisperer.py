@@ -5670,7 +5670,6 @@ class Application(Frame):
         canvas_height = int(self.PreviewCanvas.cget("height"))
         color = "#536170"
         label_color = "#34404c"
-        band = "#e8ebee"
 
         visible_left = max(0, min(canvas_width, x_lft))
         visible_right = max(0, min(canvas_width, x_rgt))
@@ -5685,15 +5684,6 @@ class Application(Frame):
         ruler_w = min(38, visible_left)
         ruler_top = visible_top-ruler_h
         ruler_left = visible_left-ruler_w
-        self.PreviewCanvas.create_rectangle(
-            visible_left, ruler_top, visible_right, visible_top,
-            fill=band, outline=color, tags="Ruler"
-        )
-        self.PreviewCanvas.create_rectangle(
-            ruler_left, visible_top, visible_left, visible_bottom,
-            fill=band, outline=color, tags="Ruler"
-        )
-
         for value in ruler_values(width):
             fraction = value/width if width else 0.0
             x = x_rgt-fraction*(x_rgt-x_lft) if self.HomeUR.get() else x_lft+fraction*(x_rgt-x_lft)
@@ -5715,19 +5705,18 @@ class Application(Frame):
                     visible_left, y, visible_left-(9 if value else ruler_w), y,
                     fill=color, tags="Ruler"
                 )
-                if value:
-                    self.PreviewCanvas.create_text(
-                        ruler_left+2, y+1, text=("%g" % value), anchor="nw",
-                        fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
-                    )
+                self.PreviewCanvas.create_text(
+                    ruler_left+2, y-2, text=("%g" % value), anchor="sw",
+                    fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
+                )
 
         x_zero = x_rgt if self.HomeUR.get() else x_lft
         self.PreviewCanvas.create_line(
-            x_zero, y_top, x_zero, y_bot, fill="#1480a8", width=1,
+            x_zero, ruler_top, x_zero, y_bot, fill="#1480a8", width=1,
             dash=(4, 3), tags="Ruler"
         )
         self.PreviewCanvas.create_line(
-            x_lft, y_top, x_rgt, y_top, fill="#1480a8", width=1,
+            ruler_left, y_top, x_rgt, y_top, fill="#1480a8", width=1,
             dash=(4, 3), tags="Ruler"
         )
         self.PreviewCanvas.create_text(
