@@ -5679,15 +5679,18 @@ class Application(Frame):
         if visible_right <= visible_left or visible_bottom <= visible_top:
             return
 
-        # Rulers remain at the top and left of the visible machine rectangle.
-        ruler_h = min(22, max(0, visible_bottom-visible_top))
-        ruler_w = min(34, max(0, visible_right-visible_left))
+        # The scale bands live outside the cutting area so they never cover
+        # imported geometry. Only the thin zero axes cross the work area.
+        ruler_h = min(22, visible_top)
+        ruler_w = min(38, visible_left)
+        ruler_top = visible_top-ruler_h
+        ruler_left = visible_left-ruler_w
         self.PreviewCanvas.create_rectangle(
-            visible_left, visible_top, visible_right, visible_top+ruler_h,
+            visible_left, ruler_top, visible_right, visible_top,
             fill=band, outline=color, tags="Ruler"
         )
         self.PreviewCanvas.create_rectangle(
-            visible_left, visible_top, visible_left+ruler_w, visible_bottom,
+            ruler_left, visible_top, visible_left, visible_bottom,
             fill=band, outline=color, tags="Ruler"
         )
 
@@ -5696,11 +5699,11 @@ class Application(Frame):
             x = x_rgt-fraction*(x_rgt-x_lft) if self.HomeUR.get() else x_lft+fraction*(x_rgt-x_lft)
             if visible_left <= x <= visible_right:
                 self.PreviewCanvas.create_line(
-                    x, visible_top, x, visible_top+(9 if value else ruler_h),
+                    x, visible_top, x, visible_top-(9 if value else ruler_h),
                     fill=color, tags="Ruler"
                 )
                 self.PreviewCanvas.create_text(
-                    x+2, visible_top+11, text=("%g" % value), anchor="nw",
+                    x+2, ruler_top+2, text=("%g" % value), anchor="nw",
                     fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
                 )
 
@@ -5709,12 +5712,12 @@ class Application(Frame):
             y = y_top+fraction*(y_bot-y_top)
             if visible_top <= y <= visible_bottom:
                 self.PreviewCanvas.create_line(
-                    visible_left, y, visible_left+(9 if value else ruler_w), y,
+                    visible_left, y, visible_left-(9 if value else ruler_w), y,
                     fill=color, tags="Ruler"
                 )
                 if value:
                     self.PreviewCanvas.create_text(
-                        visible_left+11, y+1, text=("%g" % value), anchor="nw",
+                        ruler_left+2, y+1, text=("%g" % value), anchor="nw",
                         fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
                     )
 
@@ -5728,7 +5731,7 @@ class Application(Frame):
             dash=(4, 3), tags="Ruler"
         )
         self.PreviewCanvas.create_text(
-            visible_left+3, visible_top+3, text=unit, anchor="nw",
+            ruler_left+3, ruler_top+3, text=unit, anchor="nw",
             fill="#1480a8", font=("TkDefaultFont", 7, "bold"), tags="Ruler"
         )
 
@@ -5747,6 +5750,10 @@ class Application(Frame):
         cszw = int(self.PreviewCanvas.cget("width"))
         cszh = int(self.PreviewCanvas.cget("height"))
         buff=10
+        ruler_left_margin=42
+        ruler_top_margin=26
+        plot_width=max(1, cszw-ruler_left_margin)
+        plot_height=max(1, cszh-ruler_top_margin)
         wc = float(cszw/2)
         hc = float(cszh/2)        
         
@@ -5769,23 +5776,25 @@ class Application(Frame):
             XlineShift = self.laserX
         YlineShift = self.laserY    
         if min((xmax-xmin),(ymax-ymin)) > 0 and self.zoom2image.get():
-            self.PlotScale = max((xmax-xmin)/(cszw-buff), (ymax-ymin)/(cszh-buff))
+            self.PlotScale = max((xmax-xmin)/max(1, plot_width-buff),
+                                 (ymax-ymin)/max(1, plot_height-buff))
             if self.HomeUR.get():
-                x_rgt =  (xmax-minx) / self.PlotScale - self.laserX / self.PlotScale + (cszw-(xmax-xmin)/self.PlotScale)/2
-                x_lft =  (xmax-maxx) / self.PlotScale - self.laserX / self.PlotScale + (cszw-(xmax-xmin)/self.PlotScale)/2
+                x_rgt = ruler_left_margin + (xmax-minx) / self.PlotScale - self.laserX / self.PlotScale + (plot_width-(xmax-xmin)/self.PlotScale)/2
+                x_lft = ruler_left_margin + (xmax-maxx) / self.PlotScale - self.laserX / self.PlotScale + (plot_width-(xmax-xmin)/self.PlotScale)/2
             else:
-                x_lft =  minx / self.PlotScale - self.laserX / self.PlotScale + (cszw-(xmax-xmin)/self.PlotScale)/2
-                x_rgt =  maxx / self.PlotScale - self.laserX / self.PlotScale + (cszw-(xmax-xmin)/self.PlotScale)/2
-            y_bot = -miny / self.PlotScale + self.laserY / self.PlotScale + (cszh-(ymax-ymin)/self.PlotScale)/2
-            y_top = -maxy / self.PlotScale + self.laserY / self.PlotScale + (cszh-(ymax-ymin)/self.PlotScale)/2
+                x_lft = ruler_left_margin + minx / self.PlotScale - self.laserX / self.PlotScale + (plot_width-(xmax-xmin)/self.PlotScale)/2
+                x_rgt = ruler_left_margin + maxx / self.PlotScale - self.laserX / self.PlotScale + (plot_width-(xmax-xmin)/self.PlotScale)/2
+            y_bot = ruler_top_margin-miny / self.PlotScale + self.laserY / self.PlotScale + (plot_height-(ymax-ymin)/self.PlotScale)/2
+            y_top = ruler_top_margin-maxy / self.PlotScale + self.laserY / self.PlotScale + (plot_height-(ymax-ymin)/self.PlotScale)/2
             self.segID.append( self.PreviewCanvas.create_rectangle(
                             x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="#7f8790", width=1) )
         else:
-            self.PlotScale = max((maxx-minx)/(cszw-buff), (maxy-miny)/(cszh-buff))
-            x_lft = cszw/2 + (minx-midx) / self.PlotScale
-            x_rgt = cszw/2 + (maxx-midx) / self.PlotScale
-            y_bot = cszh/2 + (maxy-midy) / self.PlotScale
-            y_top = cszh/2 + (miny-midy) / self.PlotScale
+            self.PlotScale = max((maxx-minx)/max(1, plot_width-buff),
+                                 (maxy-miny)/max(1, plot_height-buff))
+            x_lft = ruler_left_margin + plot_width/2 + (minx-midx) / self.PlotScale
+            x_rgt = ruler_left_margin + plot_width/2 + (maxx-midx) / self.PlotScale
+            y_bot = ruler_top_margin + plot_height/2 + (maxy-midy) / self.PlotScale
+            y_top = ruler_top_margin + plot_height/2 + (miny-midy) / self.PlotScale
             self.segID.append( self.PreviewCanvas.create_rectangle(
                             x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="#7f8790", width=1) )
 
