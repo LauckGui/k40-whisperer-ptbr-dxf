@@ -5200,6 +5200,8 @@ class Application(Frame):
                 self.Initialize_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
                 self.Connection_Status.place_forget()
                 Yloc=Yloc+standard_button_h+5
+                self.separator1.place(x=8, y=Yloc, width=334, height=1)
+                Yloc=Yloc+6
 
                 self.Open_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
                 self.Reload_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
@@ -5208,8 +5210,6 @@ class Application(Frame):
                 self.Array_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
-                    self.separator1.place(x=8, y=Yloc, width=334, height=1)
-                    Yloc=Yloc+6
                     self.Label_Position_Control.place(x=x_label_L, y=Yloc, width=w_label*2, height=21)
 
                     Yloc=Yloc+22
@@ -5260,21 +5260,21 @@ class Application(Frame):
                     self.Label_Step.place(x=12, y=jog_bottom+7, width=42, height=23)
                     self.Entry_Step.place(x=54, y=jog_bottom+7, width=52, height=23)
                     self.Label_Step_u.place_forget()
+                    self.separator2.place(x=8, y=jog_bottom+37, width=334, height=1)
                     self.Label_GoToX.place_forget()
                     self.Label_GoToY.place_forget()
                     ###########################################################################
                     ###########################################################################
                 else:
                     ###########################################################################
-                    self.separator1.place_forget()
                     self.Label_Position_Control.place_forget()
                     ##    
                     Yloc=Yloc+50
-                    self.separator1.place(x=8, y=Yloc, width=334, height=1)
                     Yloc=Yloc+6
                     self.Home_Button.place (x=12, y=Yloc, width=100, height=23)
                     self.UnLock_Button.place(x=12+100, y=Yloc, width=100, height=23)
                     ##
+                    self.separator2.place_forget()
                     self.Label_Step.place_forget()
                     self.Label_Step_u.place_forget()
                     self.Entry_Step.place_forget()
@@ -5527,15 +5527,18 @@ class Application(Frame):
                     self.Table_Lines[1].place(x=8, y=Yloc+27, width=334, height=1)
                     for line in self.Table_Lines[2:]:
                         line.place_forget()
+
+                # Separa visualmente os controles de posição da tabela de processos.
+                self.separator3.place(x=8, y=header_y-6, width=334, height=1)
  
                 if h>=self.pi_mode_height:
                     if (self.display_power):
                         Yloc=Yloc-5
                     else:
                         Yloc=Yloc-15
-                    self.separator2.place(x=8, y=Yloc, width=334, height=1)
+                    self.separator4.place(x=8, y=Yloc, width=334, height=1)
                 else:
-                    self.separator2.place_forget()
+                    self.separator4.place_forget()
                     
                 # End Left Column #
 
