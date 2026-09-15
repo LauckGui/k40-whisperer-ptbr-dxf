@@ -133,6 +133,7 @@ class Application(Frame):
         self.dxf_progress_indeterminate = False
         self.preview_render_generation = 0
         self.preview_line_buffer = None
+        self.preview_render_active = False
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -1298,12 +1299,29 @@ class Application(Frame):
         dy = can_dy*self.PlotScale
         if self.HomeUR.get():
             dx = -dx
-        self.laserX,self.laserY = self.XY_in_bounds(dx,dy)
-        DXmils = round((self.laserX - Xold)*1000.0,0)
-        DYmils = round((self.laserY - Yold)*1000.0,0)
+        Xnew,Ynew = self.XY_in_bounds(dx,dy)
+        DXmils = round((Xnew - Xold)*1000.0,0)
+        DYmils = round((Ynew - Yold)*1000.0,0)
         
         if self.Send_Rapid_Move(DXmils,DYmils):
-            self.menu_View_Refresh()
+            self.laserX,self.laserY = Xnew,Ynew
+            actual_pixel_dx = (Xnew-Xold)/self.PlotScale
+            if self.HomeUR.get():
+                actual_pixel_dx = -actual_pixel_dx
+            actual_pixel_dy = -(Ynew-Yold)/self.PlotScale
+            self.PreviewCanvas.move(
+                'LaserTag',
+                actual_pixel_dx - (event.x-self.move_start_x),
+                actual_pixel_dy - (event.y-self.move_start_y),
+            )
+            self._update_position_status()
+        else:
+            # Undo the visual drag when the hardware move fails.
+            self.PreviewCanvas.move(
+                'LaserTag',
+                -(event.x-self.move_start_x),
+                -(event.y-self.move_start_y),
+            )
 
     def right_mousePanStart(self,event):
         self.s_panx = event.x
@@ -3317,11 +3335,11 @@ class Application(Frame):
         if self.k40 == None:
             self.laserX  = Xnew
             self.laserY  = Ynew
-            self.menu_View_Refresh()
+            self._move_preview_by_anchor_delta(dxmils/1000.0, dymils/1000.0)
         elif self.Send_Rapid_Move(dxmils,dymils):
             self.laserX  = Xnew
             self.laserY  = Ynew
-            self.menu_View_Refresh()
+            self._move_preview_by_anchor_delta(dxmils/1000.0, dymils/1000.0)
         
 
     def Send_Rapid_Move(self,dxmils,dymils):
@@ -4645,6 +4663,9 @@ class Application(Frame):
         dummy_event.widget=self.master
         self.Master_Configure(dummy_event,1)
         self.Plot_Data(incremental=incremental)
+        self._update_position_status()
+
+    def _update_position_status(self):
         xmin,xmax,ymin,ymax = self.Get_Design_Bounds()
         W = xmax-xmin
         H = ymax-ymin
@@ -4676,6 +4697,28 @@ class Application(Frame):
                                   U_display))
 
         self.statusbar.configure( bg = 'white' )
+
+    def _move_preview_by_anchor_delta(self, dx_inches, dy_inches):
+        """Translate the rendered job without rebuilding its vector geometry."""
+        if self.preview_render_active:
+            # Cancel the old batches and rebuild incrementally at the new anchor.
+            self.menu_View_Refresh(incremental=True)
+            return
+
+        self._move_preview_tag('LaserTag', dx_inches, dy_inches)
+        self._update_position_status()
+
+    def _move_preview_dot_by_offset_delta(self, dx_inches, dy_inches):
+        """Translate only the temporary head marker; job geometry stays fixed."""
+        self._move_preview_tag('LaserDot', dx_inches, dy_inches)
+        self._update_position_status()
+
+    def _move_preview_tag(self, tag, dx_inches, dy_inches):
+        pixel_dx = dx_inches / self.PlotScale
+        if self.HomeUR.get():
+            pixel_dx = -pixel_dx
+        pixel_dy = -dy_inches / self.PlotScale
+        self.PreviewCanvas.move(tag, pixel_dx, pixel_dy)
         
     def menu_Inside_First_Callback(self, varName, index, mode):
         if self.GcodeData.ecoords != []:
@@ -5413,6 +5456,7 @@ class Application(Frame):
     def Plot_Data(self, incremental=False):
         self.preview_render_generation += 1
         render_generation = self.preview_render_generation
+        self.preview_render_active = False
         self.preview_line_buffer = [] if incremental else None
         self.PreviewCanvas.delete(ALL)
         self.calc_button.place_forget()
@@ -5680,6 +5724,7 @@ class Application(Frame):
             return
 
         if start == 0 and pending:
+            self.preview_render_active = True
             self.import_progress.configure(
                 mode="determinate", maximum=len(pending), value=0
             )
@@ -5701,6 +5746,7 @@ class Application(Frame):
                 1, lambda: self._render_preview_lines(pending, generation, end, batch_size)
             )
         else:
+            self.preview_render_active = False
             self.import_progress.pack_forget()
             self.statusMessage.set("DXF importado; prévia pronta.")
         
@@ -5833,11 +5879,19 @@ class Application(Frame):
             
         if self.k40 != None:
             if self.Send_Rapid_Move( xdist,ydist ):
+                old_pos_offset = self.pos_offset
                 self.pos_offset = new_pos_offset
-                self.menu_View_Refresh()
+                self._move_preview_dot_by_offset_delta(
+                    (new_pos_offset[0] - old_pos_offset[0]) / 1000.0,
+                    (new_pos_offset[1] - old_pos_offset[1]) / 1000.0,
+                )
         else:      
+            old_pos_offset = self.pos_offset
             self.pos_offset = new_pos_offset
-            self.menu_View_Refresh()
+            self._move_preview_dot_by_offset_delta(
+                (new_pos_offset[0] - old_pos_offset[0]) / 1000.0,
+                (new_pos_offset[1] - old_pos_offset[1]) / 1000.0,
+            )
     
     ################################################################################
     #                       Job and Design Settings Window                        #
