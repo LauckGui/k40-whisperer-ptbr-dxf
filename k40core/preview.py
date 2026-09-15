@@ -1,5 +1,40 @@
 """Helpers for producing lightweight previews without changing job geometry."""
 
+import math
+
+
+def ruler_step(span, target_intervals=8):
+    """Return a readable 1/2/5 ruler interval for a numeric span."""
+    span = abs(float(span))
+    if span == 0.0:
+        return 1.0
+    rough = span/max(1, int(target_intervals))
+    magnitude = 10.0**math.floor(math.log10(rough))
+    normalized = rough/magnitude
+    if normalized <= 1.0:
+        nice = 1.0
+    elif normalized <= 2.0:
+        nice = 2.0
+    elif normalized <= 5.0:
+        nice = 5.0
+    else:
+        nice = 10.0
+    return nice*magnitude
+
+
+def ruler_values(span, target_intervals=8):
+    """Generate major ruler values including both zero and the exact limit."""
+    span = max(0.0, float(span))
+    step = ruler_step(span, target_intervals)
+    values = [0.0]
+    value = step
+    while value < span-1e-9:
+        values.append(value)
+        value += step
+    if span > 0.0 and abs(values[-1]-span) > 1e-9:
+        values.append(span)
+    return values
+
 
 def transparent_raster_preview(image, size):
     """Return a black RGBA overlay where white/off pixels are transparent."""

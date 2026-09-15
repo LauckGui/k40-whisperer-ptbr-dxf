@@ -37,7 +37,7 @@ from k40core.configuration import ConfigurationError, load_configuration, save_c
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
-from k40core.preview import iter_preview_polylines, transparent_raster_preview
+from k40core.preview import iter_preview_polylines, ruler_values, transparent_raster_preview
 from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
 from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
@@ -201,6 +201,11 @@ class Application(Frame):
         elif name == "reload":
             draw.arc((p(3),p(3),p(21),p(21)), 35, 320, fill=color, width=width)
             draw.polygon(((p(18),p(2)),(p(23),p(3)),(p(20),p(8))), fill=color)
+        elif name == "copies":
+            draw.rounded_rectangle((p(3),p(3),p(15),p(15)), radius=p(1),
+                                   outline=color, width=width)
+            draw.rounded_rectangle((p(9),p(9),p(21),p(21)), radius=p(1),
+                                   fill="white", outline=color, width=width)
         elif name == "home":
             draw.polygon(((p(2),p(11)),(p(12),p(2)),(p(22),p(11))), fill=color)
             draw.rectangle((p(5),p(10),p(19),p(21)), fill=color)
@@ -819,6 +824,7 @@ class Application(Frame):
             "plug_green": self.make_ui_icon("plug", 20, "#16a34a"),
             "folder": self.make_ui_icon("folder", 20),
             "reload": self.make_ui_icon("reload", 20),
+            "copies": self.make_ui_icon("copies", 20),
             "home": self.make_ui_icon("home", 20),
             "unlock": self.make_ui_icon("unlock", 20),
             "target": self.make_ui_icon("target", 20),
@@ -835,7 +841,7 @@ class Application(Frame):
         self.Initialize_Button.configure(bd=1, relief=RAISED, highlightthickness=0)
         self.Open_Button.configure(image=self.ui_icons["folder"], compound=LEFT)
         self.Reload_Button.configure(image=self.ui_icons["reload"], compound=LEFT)
-        self.Array_Button.configure(bd=1, relief=RAISED, highlightthickness=0)
+        self.Array_Button.configure(image=self.ui_icons["copies"], compound=LEFT)
         self.Home_Button.configure(image=self.ui_icons["home"], compound=LEFT)
         self.UnLock_Button.configure(image=self.ui_icons["unlock"], compound=LEFT)
         self.GoTo_Button.configure(image=self.ui_icons["target_compact"], compound=LEFT)
@@ -2717,6 +2723,97 @@ class Application(Frame):
             return False
     #######################################################################
 
+    def _make_raster_coords_worker(self):
+        """Calculate raster paths away from Tk's event thread."""
+        try:
+            if self.RengData.rpaths:
+                self.raster_time_queue.put(("complete", None))
+                return
+            if self.RengData.image is None:
+                raise ValueError("Não há preenchimento raster para calcular.")
+
+            image_temp = self.RengData.image.convert("L")
+            if self.raster_time_options["negate"]:
+                image_temp = ImageOps.invert(image_temp)
+            if self.raster_time_options["mirror"]:
+                image_temp = ImageOps.mirror(image_temp)
+            if self.raster_time_options["rotate"]:
+                image_temp = image_temp.rotate(90, expand=True)
+
+            xscale = self.raster_time_options["xscale"]
+            yscale = self.raster_time_options["yscale"]
+            if xscale != 1.0 or yscale != 1.0:
+                width, height = image_temp.size
+                image_temp = image_temp.resize(
+                    (max(1, int(width*xscale)), max(1, int(height*yscale)))
+                )
+
+            if self.raster_time_options["halftone"]:
+                pixels = int(round(
+                    self.input_dpi/self.raster_time_options["halftone_dpi"], 1
+                ))
+                if pixels <= 0:
+                    raise ValueError("Resolução de meio-tom inválida.")
+                width, height = image_temp.size
+                image_temp = image_temp.resize(
+                    (max(1, int(width/pixels)), max(1, int(height/pixels)))
+                )
+                image_temp = self.convert_halftoning(
+                    image_temp,
+                    curve=self.raster_time_options["halftone_curve"],
+                    progress=lambda message: self.raster_time_queue.put(
+                        ("message", message)
+                    ),
+                )
+                image_temp = image_temp.resize((width, height))
+            else:
+                image_temp = image_temp.point(lambda value: 0 if value < 128 else 255, '1')
+
+            scanlines = extract_scanlines(
+                image_temp, self.input_dpi, self.raster_time_options["raster_step"],
+                cutoff=128, cancelled=lambda: self.stop[0],
+                progress=lambda percent: self.raster_time_queue.put(("progress", percent)),
+                collect_coords=False, collect_hull=False,
+            )
+            self.raster_time_queue.put(("complete", scanlines))
+        except Exception as exc:
+            self.raster_time_queue.put(("error", (exc, traceback.format_exc())))
+
+    def _poll_raster_time(self):
+        try:
+            event, payload = self.raster_time_queue.get_nowait()
+        except queue.Empty:
+            if self.raster_time_thread is not None:
+                self.master.after(50, self._poll_raster_time)
+            return
+
+        if event == "progress":
+            self.statusMessage.set("Calculando tempo do raster: %.1f %%" % payload)
+            self.master.after(10, self._poll_raster_time)
+            return
+        if event == "message":
+            self.statusMessage.set(payload)
+            self.master.after(10, self._poll_raster_time)
+            return
+
+        self.raster_time_thread = None
+        self.raster_time_queue = None
+        self.stop[0] = True
+        self.set_gui("normal")
+        if event == "error":
+            error, details = payload
+            self.statusbar.configure(bg='red')
+            self.statusMessage.set("Falha ao calcular raster: %s" % error)
+            debug_message(details)
+            return
+
+        if payload is not None:
+            self.RengData.len = payload.length_inches
+            self.RengData.n_scanlines = payload.scanline_count
+        self.refreshTime()
+        self.statusbar.configure(bg='white')
+        self.statusMessage.set("Tempo estimado calculado: %s" % self.Reng_time.get())
+
 
     def rotate_raster(self,image_in):
         wim,him = image_in.size
@@ -2755,14 +2852,17 @@ class Application(Frame):
 
     '''This Example opens an Image and transform the image into halftone.  -Isai B. Cicourel'''
     # Create a Half-tone version of the image
-    def convert_halftoning(self,image):
+    def convert_halftoning(self, image, curve=None, progress=None):
         image = image.convert('L')
         x_lim, y_lim = image.size
         pixel = image.load()
         
-        M1 = float(self.bezier_M1.get())
-        M2 = float(self.bezier_M2.get())
-        w  = float(self.bezier_weight.get())
+        if curve is None:
+            M1 = float(self.bezier_M1.get())
+            M2 = float(self.bezier_M2.get())
+            w = float(self.bezier_weight.get())
+        else:
+            M1, M2, w = curve
         
         if w > 0:
             x,y = self.generate_bezier(M1,M2,w)
@@ -2779,13 +2879,20 @@ class Application(Frame):
                 stamp=int(3*time()) #update every 1/3 of a second
                 if (stamp != timestamp):
                     timestamp=stamp #interlock
-                    self.statusMessage.set("Ajustando a intensidade da imagem: %.1f %%" %( (100.0*y)/y_lim ) )
-                    self.master.update()
+                    message = "Ajustando a intensidade da imagem: %.1f %%" % ((100.0*y)/y_lim)
+                    if progress is None:
+                        self.statusMessage.set(message)
+                        self.master.update()
+                    else:
+                        progress(message)
                 for x in range(1, x_lim):
                     pixel[x, y] = val_map[ pixel[x, y] ]
 
-        self.statusMessage.set("Criando imagem em meio-tom." )
-        self.master.update()
+        if progress is None:
+            self.statusMessage.set("Criando imagem em meio-tom.")
+            self.master.update()
+        else:
+            progress("Criando imagem em meio-tom.")
         image = image.convert('1')
         return image
 
@@ -4808,16 +4915,37 @@ class Application(Frame):
         self.Master_Configure(dummy_event,1)
 
     def menu_Calc_Raster_Time(self,event=None):
+        if getattr(self, "raster_time_thread", None) is not None:
+            return
         self.include_Time.set(1)
         self.set_gui("disabled")
         self.stop[0]=False
-        calculated = self.make_raster_coords()
-        self.stop[0]=True
-        self.refreshTime()
-        self.set_gui("normal")
-        self.menu_View_Refresh()
-        if calculated:
-            self.statusMessage.set("Tempo estimado calculado: %s" % self.Reng_time.get())
+        yscale = float(self.LaserYscale.get())
+        if self.rotary.get():
+            yscale *= float(self.LaserRscale.get())
+        self.raster_time_options = {
+            "negate": bool(self.negate.get()),
+            "mirror": bool(self.mirror.get()),
+            "rotate": bool(self.rotate.get()),
+            "xscale": float(self.LaserXscale.get()),
+            "yscale": yscale,
+            "halftone": bool(self.halftone.get()),
+            "halftone_dpi": float(self.ht_size.get()),
+            "halftone_curve": (
+                float(self.bezier_M1.get()), float(self.bezier_M2.get()),
+                float(self.bezier_weight.get()),
+            ),
+            "raster_step": int(self.get_raster_step_1000in()),
+        }
+        self.statusbar.configure(bg='#f0ad4e')
+        self.statusMessage.set("Calculando tempo do raster...")
+        self.raster_time_queue = queue.Queue()
+        self.raster_time_thread = threading.Thread(
+            target=self._make_raster_coords_worker,
+            name="k40-raster-time", daemon=True,
+        )
+        self.raster_time_thread.start()
+        self.master.after(50, self._poll_raster_time)
         
 
     def menu_Help_About(self):
@@ -5533,6 +5661,77 @@ class Application(Frame):
     ##########################################
     #        CANVAS PLOTTING STUFF           #
     ##########################################
+    def _draw_machine_rulers(self, x_lft, y_top, x_rgt, y_bot):
+        """Draw machine-unit rulers and the X=0/Y=0 reference axes."""
+        width = float(self.LaserXsize.get())
+        height = float(self.LaserYsize.get())
+        unit = self.units.get()
+        canvas_width = int(self.PreviewCanvas.cget("width"))
+        canvas_height = int(self.PreviewCanvas.cget("height"))
+        color = "#536170"
+        label_color = "#34404c"
+        band = "#e8ebee"
+
+        visible_left = max(0, min(canvas_width, x_lft))
+        visible_right = max(0, min(canvas_width, x_rgt))
+        visible_top = max(0, min(canvas_height, y_top))
+        visible_bottom = max(0, min(canvas_height, y_bot))
+        if visible_right <= visible_left or visible_bottom <= visible_top:
+            return
+
+        # Rulers remain at the top and left of the visible machine rectangle.
+        ruler_h = min(22, max(0, visible_bottom-visible_top))
+        ruler_w = min(34, max(0, visible_right-visible_left))
+        self.PreviewCanvas.create_rectangle(
+            visible_left, visible_top, visible_right, visible_top+ruler_h,
+            fill=band, outline=color, tags="Ruler"
+        )
+        self.PreviewCanvas.create_rectangle(
+            visible_left, visible_top, visible_left+ruler_w, visible_bottom,
+            fill=band, outline=color, tags="Ruler"
+        )
+
+        for value in ruler_values(width):
+            fraction = value/width if width else 0.0
+            x = x_rgt-fraction*(x_rgt-x_lft) if self.HomeUR.get() else x_lft+fraction*(x_rgt-x_lft)
+            if visible_left <= x <= visible_right:
+                self.PreviewCanvas.create_line(
+                    x, visible_top, x, visible_top+(9 if value else ruler_h),
+                    fill=color, tags="Ruler"
+                )
+                self.PreviewCanvas.create_text(
+                    x+2, visible_top+11, text=("%g" % value), anchor="nw",
+                    fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
+                )
+
+        for value in ruler_values(height):
+            fraction = value/height if height else 0.0
+            y = y_top+fraction*(y_bot-y_top)
+            if visible_top <= y <= visible_bottom:
+                self.PreviewCanvas.create_line(
+                    visible_left, y, visible_left+(9 if value else ruler_w), y,
+                    fill=color, tags="Ruler"
+                )
+                if value:
+                    self.PreviewCanvas.create_text(
+                        visible_left+11, y+1, text=("%g" % value), anchor="nw",
+                        fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
+                    )
+
+        x_zero = x_rgt if self.HomeUR.get() else x_lft
+        self.PreviewCanvas.create_line(
+            x_zero, y_top, x_zero, y_bot, fill="#1480a8", width=1,
+            dash=(4, 3), tags="Ruler"
+        )
+        self.PreviewCanvas.create_line(
+            x_lft, y_top, x_rgt, y_top, fill="#1480a8", width=1,
+            dash=(4, 3), tags="Ruler"
+        )
+        self.PreviewCanvas.create_text(
+            visible_left+3, visible_top+3, text=unit, anchor="nw",
+            fill="#1480a8", font=("TkDefaultFont", 7, "bold"), tags="Ruler"
+        )
+
     def Plot_Data(self, incremental=False):
         self.preview_render_generation += 1
         render_generation = self.preview_render_generation
@@ -5580,7 +5779,7 @@ class Application(Frame):
             y_bot = -miny / self.PlotScale + self.laserY / self.PlotScale + (cszh-(ymax-ymin)/self.PlotScale)/2
             y_top = -maxy / self.PlotScale + self.laserY / self.PlotScale + (cszh-(ymax-ymin)/self.PlotScale)/2
             self.segID.append( self.PreviewCanvas.create_rectangle(
-                            x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="gray80", width = 0) )
+                            x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="#7f8790", width=1) )
         else:
             self.PlotScale = max((maxx-minx)/(cszw-buff), (maxy-miny)/(cszh-buff))
             x_lft = cszw/2 + (minx-midx) / self.PlotScale
@@ -5588,7 +5787,9 @@ class Application(Frame):
             y_bot = cszh/2 + (maxy-midy) / self.PlotScale
             y_top = cszh/2 + (miny-midy) / self.PlotScale
             self.segID.append( self.PreviewCanvas.create_rectangle(
-                            x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="gray80", width = 0) )
+                            x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="#7f8790", width=1) )
+
+        self._draw_machine_rulers(x_lft, y_top, x_rgt, y_bot)
 
 
         ######################################
@@ -5769,6 +5970,10 @@ class Application(Frame):
             head_offset=False
         
         self.Plot_circle(self.laserX+xoff,self.laserY+yoff,x_lft,y_top,self.PlotScale,dot_col,radius=5,cross_hair=head_offset)
+
+        # Raster images and vector paths are drawn after the machine frame;
+        # keep scales and zero axes readable above all job content.
+        self.PreviewCanvas.tag_raise("Ruler")
 
         if self.preview_line_buffer is not None:
             pending = self.preview_line_buffer

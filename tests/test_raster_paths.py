@@ -1,11 +1,25 @@
 import unittest
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from k40core.raster_paths import extract_scanlines
 
 
 class RasterPathTests(unittest.TestCase):
+    def test_metrics_only_avoids_materializing_paths(self):
+        image = Image.new("L", (10, 2), 255)
+        ImageDraw.Draw(image).rectangle((2, 0, 7, 1), fill=0)
+
+        result = extract_scanlines(
+            image, dpi=100, raster_step_mils=10,
+            collect_coords=False, collect_hull=False,
+        )
+
+        self.assertEqual(result.ecoords, [])
+        self.assertEqual(result.hull_points, [])
+        self.assertGreater(result.length_inches, 0)
+        self.assertEqual(result.scanline_count, 2)
+
     def test_extracts_dark_runs_and_metrics_without_per_pixel_python_loop(self):
         image = Image.new("L", (6, 3), 255)
         pixels = image.load()

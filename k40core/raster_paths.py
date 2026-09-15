@@ -16,7 +16,9 @@ class RasterScanlines:
 
 def extract_scanlines(image, dpi: float, raster_step_mils: int, cutoff: int = 128,
                       cancelled: Callable[[], bool] | None = None,
-                      progress: Callable[[float], None] | None = None) -> RasterScanlines:
+                      progress: Callable[[float], None] | None = None,
+                      collect_coords: bool = True,
+                      collect_hull: bool = True) -> RasterScanlines:
     """Extract dark pixel runs using vectorized per-row transition detection."""
     import numpy as np
 
@@ -48,13 +50,15 @@ def extract_scanlines(image, dpi: float, raster_step_mils: int, cutoff: int = 12
             y = (height_mils-y_mils)/1000.0
             length += (right-left)/dpi
             scanlines += 1
-            hull_points.extend(([left/dpi, y], [right/dpi, y]))
+            if collect_hull:
+                hull_points.extend(([left/dpi, y], [right/dpi, y]))
             for start, end in runs:
                 loop += 1
-                ecoords.extend((
-                    [float(start)/dpi, y, loop],
-                    [float(end)/dpi, y, loop],
-                ))
+                if collect_coords:
+                    ecoords.extend((
+                        [float(start)/dpi, y, loop],
+                        [float(end)/dpi, y, loop],
+                    ))
         if progress is not None and step_index % 100 == 0:
             progress(100.0*row_index/max(1, height))
 
