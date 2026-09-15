@@ -12,6 +12,30 @@ class RasterizationError(ValueError):
     pass
 
 
+def raster_pixel_count(bounds: Bounds, dpi: float) -> int:
+    """Return the pixel count required for physical bounds at the given DPI."""
+    if dpi <= 0.0:
+        raise RasterizationError("O DPI precisa ser positivo.")
+    width = max(1, int(math.ceil(bounds.width / 25.4 * dpi)))
+    height = max(1, int(math.ceil(bounds.height / 25.4 * dpi)))
+    return width*height
+
+
+def dpi_for_pixel_budget(bounds: Bounds, requested_dpi: float,
+                         maximum_pixels: int) -> float:
+    """Lower DPI only when required to keep the working bitmap in budget."""
+    if maximum_pixels <= 0:
+        raise RasterizationError("O limite de pixels precisa ser positivo.")
+    if raster_pixel_count(bounds, requested_dpi) <= maximum_pixels:
+        return float(requested_dpi)
+    area_inches = bounds.width/25.4 * bounds.height/25.4
+    if area_inches <= 0.0:
+        raise RasterizationError("O preenchimento não possui uma área rasterizável.")
+    # Leave a small margin for ceil() on both dimensions.
+    fitted = math.sqrt(maximum_pixels/area_inches)*0.999
+    return max(1.0, min(float(requested_dpi), fitted))
+
+
 def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = None,
                     maximum_pixels: int = 100_000_000,
                     color_intensities=None):
@@ -38,10 +62,11 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
 
     width = max(1, int(math.ceil(bounds.width / 25.4 * dpi)))
     height = max(1, int(math.ceil(bounds.height / 25.4 * dpi)))
-    if width * height > maximum_pixels:
+    pixel_count = width*height
+    if pixel_count > maximum_pixels:
         raise RasterizationError(
             "Raster exigiria %d megapixels; reduza a resolução." %
-            int(math.ceil(width * height / 1_000_000.0))
+            int(math.ceil(pixel_count / 1_000_000.0))
         )
 
     output = Image.new("L", (width, height), 255)

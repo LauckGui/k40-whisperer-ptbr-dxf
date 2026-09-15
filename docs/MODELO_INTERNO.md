@@ -159,6 +159,10 @@ proporção configurada da máquina. A expansão em coordenadas ocorre somente n
 fronteira legada, em uma thread de trabalho, enquanto o documento canônico
 continua contendo uma única geometria-base. Preenchimentos sólidos pertencem ao
 mesmo array e são rasterizados novamente com os deslocamentos das instâncias.
+Quando a área repetida excederia o orçamento do bitmap de trabalho, o DPI é
+reduzido automaticamente ao maior valor que caiba em 50 milhões de pixels. As
+dimensões físicas, o espaçamento do array e as passadas não são alterados; a
+interface informa o DPI efetivamente utilizado.
 
 ## Configuração persistente
 

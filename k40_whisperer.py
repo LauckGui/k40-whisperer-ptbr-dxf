@@ -38,7 +38,7 @@ from k40core.arrays import array_steps, instance_array_bounds, maximum_array_cou
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
 from k40core.preview import iter_preview_polylines, transparent_raster_preview
-from k40core.rasterizer import rasterize_fills
+from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
 import inkex
@@ -164,6 +164,7 @@ class Application(Frame):
         self.Design_bounds = (0,0,0,0)
         self.UI_image = None
         self.job_document = None
+        self.source_raster_dpi = 0.0
         #if self.HomeUR.get():
         self.move_head_window_temporary([0.0,0.0])
         #else:
@@ -3009,6 +3010,7 @@ class Application(Frame):
                     if imported.raster_image is not None:
                         self.RengData.set_image(imported.raster_image)
                         self.input_dpi = imported.raster_dpi
+                        self.source_raster_dpi = imported.raster_dpi
                         self.wim, self.him = imported.raster_image.size
                         self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
                     self.Design_bounds = imported.bounds
@@ -6257,10 +6259,19 @@ class Application(Frame):
                 cut_data, engrave_data = ECoord(), ECoord()
                 cut_data.make_ecoords(cut_lines, scale=1.0)
                 engrave_data.make_ecoords(engrave_lines, scale=1.0)
-                raster_image = (rasterize_fills(document, self.input_dpi)
-                                if document.fills else None)
+                requested_raster_dpi = self.source_raster_dpi or self.input_dpi
+                raster_dpi = requested_raster_dpi
+                if document.fills:
+                    raster_dpi = dpi_for_pixel_budget(
+                        document.bounds, requested_raster_dpi, 50_000_000
+                    )
+                    raster_image = rasterize_fills(
+                        document, raster_dpi, maximum_pixels=50_000_000
+                    )
+                else:
+                    raster_image = None
                 self.array_build_queue.put(
-                    ("complete", (cut_data, engrave_data, raster_image))
+                    ("complete", (cut_data, engrave_data, raster_image, raster_dpi))
                 )
             except Exception as exc:
                 self.array_build_queue.put(("error", exc))
@@ -6292,9 +6303,11 @@ class Application(Frame):
             self.statusMessage.set("Falha ao criar múltiplas cópias: %s" % payload)
             return
 
-        self.VcutData, self.VengData, raster_image = payload
+        self.VcutData, self.VengData, raster_image, raster_dpi = payload
+        previous_raster_dpi = self.input_dpi
         if raster_image is not None:
             self.RengData.set_image(raster_image)
+            self.input_dpi = raster_dpi
             self.wim, self.him = raster_image.size
             self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
             self.SCALE = 0
@@ -6308,7 +6321,13 @@ class Application(Frame):
         total = (self.job_document.arrays[0].columns*self.job_document.arrays[0].rows
                  if self.job_document.arrays else 1)
         self.statusbar.configure(bg='white')
-        self.statusMessage.set("Múltiplas cópias aplicadas: %d peças." % total)
+        if raster_image is not None and raster_dpi < previous_raster_dpi-0.01:
+            self.statusMessage.set(
+                "Múltiplas cópias: %d peças; raster ajustado para %.0f DPI." %
+                (total, raster_dpi)
+            )
+        else:
+            self.statusMessage.set("Múltiplas cópias aplicadas: %d peças." % total)
         self.menu_View_Refresh(incremental=True)
 
     def JOB_Settings_Window(self):

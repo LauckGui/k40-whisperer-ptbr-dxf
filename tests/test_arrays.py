@@ -6,7 +6,9 @@ from k40core.model import (
     Bounds, FillObject, ImportSource, InstanceArray, JobDocument, Layer, LineSegment,
     Operation, Point, VectorObject, VectorPath,
 )
-from k40core.rasterizer import rasterize_fills
+from k40core.rasterizer import (
+    dpi_for_pixel_budget, raster_pixel_count, rasterize_fills,
+)
 
 
 class InstanceArrayTests(unittest.TestCase):
@@ -96,6 +98,15 @@ class InstanceArrayTests(unittest.TestCase):
         self.assertEqual(image.size, (5, 2))
         self.assertEqual(image.getpixel((0, 0)), 0)
         self.assertEqual(image.getpixel((4, 0)), 0)
+
+    def test_large_raster_dpi_is_fitted_to_memory_budget(self):
+        bounds = Bounds(0, 0, 500, 286)
+
+        fitted = dpi_for_pixel_budget(bounds, 1000.0, 50_000_000)
+
+        self.assertLess(fitted, 1000.0)
+        self.assertLessEqual(raster_pixel_count(bounds, fitted), 50_000_000)
+        self.assertEqual(dpi_for_pixel_budget(bounds, 300.0, 50_000_000), 300.0)
 
 
 if __name__ == "__main__":
