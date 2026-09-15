@@ -260,7 +260,7 @@ def import_dxf_document(
             )
         )
 
-    report_progress(progress, "converting", message="Convertendo entidades DXF...")
+    report_progress(progress, "converting", 0, analyzable, "Convertendo entidades DXF...")
     converted = 0
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
         check_cancelled(cancelled)
@@ -321,7 +321,13 @@ def import_dxf_document(
         except (TypeError, ValueError, AttributeError, NotImplementedError):
             skipped[entity_type] += 1
         if index % progress_batch == 0:
-            report_progress(progress, "converting", index, message=f"{converted} objetos convertidos...")
+            report_progress(
+                progress,
+                "converting",
+                converted,
+                analyzable,
+                message=f"{converted} de {analyzable} objetos convertidos...",
+            )
         path = None
         flattened = None
         points = None
@@ -341,5 +347,5 @@ def import_dxf_document(
     if not result.vectors:
         raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
     result.validate()
-    report_progress(progress, "complete", converted, converted, f"{converted} objetos DXF convertidos.")
+    report_progress(progress, "complete", analyzable, analyzable, f"{converted} objetos DXF convertidos.")
     return result

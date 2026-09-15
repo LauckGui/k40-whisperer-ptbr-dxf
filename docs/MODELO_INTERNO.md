@@ -92,6 +92,11 @@ e os diálogos são tratados pela thread do Tkinter. O desenho anterior permanec
 ativo até que o novo documento esteja completo e validado. O operador pode
 cancelar usando **Parar**.
 
+Uma barra de progresso temporária aparece acima do status. Ela é indeterminada
+durante leitura e análise inicial; após a contagem das entidades convertíveis,
+passa ao modo percentual durante a conversão e chega a 100% antes da publicação
+do documento.
+
 A análise do plano e a conversão percorrem as entidades incrementalmente. Os
 pontos achatados de cada entidade são liberados antes do próximo lote, evitando
 manter uma segunda cópia completa da geometria na memória. O importador publica

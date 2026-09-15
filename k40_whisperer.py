@@ -56,6 +56,7 @@ if VERSION == 3:
     from tkinter import *
     from tkinter.filedialog import *
     import tkinter.messagebox
+    from tkinter import ttk
     MAXINT = sys.maxsize
     def trace_variable(variable, callback):
         return variable.trace_add("write", callback)
@@ -66,6 +67,7 @@ else:
     from Tkinter import *
     from tkFileDialog import *
     import tkMessageBox
+    import ttk
     MAXINT = sys.maxint
     def trace_variable(variable, callback):
         return variable.trace_variable("w", callback)
@@ -128,6 +130,7 @@ class Application(Frame):
         self.dxf_import_thread = None
         self.dxf_import_queue = None
         self.dxf_import_cancel = None
+        self.dxf_progress_indeterminate = False
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -593,6 +596,12 @@ class Application(Frame):
         self.statusbar = Label(self.master, textvariable=self.statusMessage, \
                                    bd=1, relief=SUNKEN , height=1)
         self.statusbar.pack(anchor=SW, fill=X, side=BOTTOM)
+        self.import_progress = ttk.Progressbar(
+            self.master,
+            orient=HORIZONTAL,
+            mode="indeterminate",
+            maximum=100,
+        )
         
 
         # Canvas
@@ -2771,6 +2780,10 @@ class Application(Frame):
         self.set_gui("disabled")
         self.statusbar.configure(bg='#f0ad4e')
         self.statusMessage.set("Iniciando importação DXF...")
+        self.import_progress.configure(mode="indeterminate", maximum=100, value=0)
+        self.import_progress.pack(anchor=SW, fill=X, side=BOTTOM, padx=2, pady=(1, 0))
+        self.import_progress.start(12)
+        self.dxf_progress_indeterminate = True
 
         def request_from_ui(kind):
             request = {"kind": kind, "event": threading.Event(), "value": None}
@@ -2812,7 +2825,21 @@ class Application(Frame):
             while True:
                 event, payload = self.dxf_import_queue.get_nowait()
                 if event == "progress":
-                    self.statusMessage.set(payload.message or "Importando DXF...")
+                    message = payload.message or "Importando DXF..."
+                    if payload.total:
+                        if self.dxf_progress_indeterminate:
+                            self.import_progress.stop()
+                            self.dxf_progress_indeterminate = False
+                        self.import_progress.configure(mode="determinate", maximum=payload.total)
+                        self.import_progress["value"] = min(payload.completed, payload.total)
+                        percent = 100.0 * payload.completed / payload.total
+                        self.statusMessage.set("%s (%.0f%%)" % (message, percent))
+                    else:
+                        if not self.dxf_progress_indeterminate:
+                            self.import_progress.configure(mode="indeterminate", maximum=100, value=0)
+                            self.import_progress.start(12)
+                            self.dxf_progress_indeterminate = True
+                        self.statusMessage.set(message)
                 elif event == "request":
                     if payload["kind"] == "units":
                         dialog = UnitsDialog(root)
@@ -2853,6 +2880,9 @@ class Application(Frame):
             pass
 
         if terminal:
+            self.import_progress.stop()
+            self.import_progress.pack_forget()
+            self.dxf_progress_indeterminate = False
             self.dxf_import_thread = None
             self.dxf_import_queue = None
             self.dxf_import_cancel = None

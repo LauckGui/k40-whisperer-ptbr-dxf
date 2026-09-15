@@ -211,19 +211,23 @@ class DxfImporterTests(unittest.TestCase):
         drawing = ezdxf.new("R12")
         drawing.modelspace().add_line((0, 0), (10, 0))
         drawing.saveas(path)
-        phases = []
+        events = []
 
         document = import_dxf_document(
             path,
             unit_resolver=lambda: "Millimeters",
-            progress=lambda event: phases.append(event.phase),
+            progress=events.append,
         )
 
         self.assertEqual(document.bounds.max_x, 10.0)
+        phases = [event.phase for event in events]
         self.assertIn("reading", phases)
         self.assertIn("analyzing", phases)
-        self.assertIn("converting", phases)
-        self.assertEqual(phases[-1], "complete")
+        conversion = next(event for event in events if event.phase == "converting" and event.total)
+        self.assertEqual(conversion.completed, 0)
+        self.assertEqual(conversion.total, 1)
+        self.assertEqual(events[-1].phase, "complete")
+        self.assertEqual(events[-1].completed, events[-1].total)
 
     def test_cooperative_cancellation_stops_before_conversion(self):
         path = self._path()
