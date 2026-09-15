@@ -71,8 +71,10 @@ fluxo `Open_DXF`; o comportamento está protegido por teste automatizado.
 
 O importador também resolve herança de camada e cor em blocos `INSERT`, respeita
 cores True Color e mantém layers ocultos fora da saída enviada ao backend
-legado. Geometria com coordenada Z relevante é rejeitada em vez de ser projetada
-silenciosamente no plano da máquina.
+legado. Para geometria 3D, o modo automático reconhece desenhos contidos nos
+planos XY, XZ ou YZ e registra a projeção como aviso estruturado. Geometria que
+não esteja em um desses planos exige a escolha explícita de XY, XZ ou YZ; assim
+a projeção continua disponível sem acontecer silenciosamente.
 
 Falhas inesperadas do leitor moderno interrompem a abertura com uma mensagem de
 erro. O parser antigo só pode ser usado quando o importador declarar

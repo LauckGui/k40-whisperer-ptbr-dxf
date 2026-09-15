@@ -27,6 +27,10 @@ class DxfImportError(Exception):
     pass
 
 
+class DxfProjectionRequired(DxfImportError):
+    """Indica que o operador precisa escolher o plano de projeção."""
+
+
 _ASSUMED_UNIT_CODES = {
     "inches": 1,
     "feet": 2,
@@ -117,7 +121,38 @@ def _effective_color(entity, document, context, layer_name) -> Color | None:
     return _color_from_ezdxf(context.resolve_all(entity).color)
 
 
-def import_dxf_document(filename, tolerance_mm=0.0127, assumed_units=None) -> JobDocument:
+def _select_projection(records, tolerance_source, requested):
+    requested = str(requested).lower()
+    if requested not in {"auto", "xy", "xz", "yz"}:
+        raise ValueError("Plano de projeção deve ser auto, XY, XZ ou YZ.")
+    values = tuple(point for _, _, _, points in records for point in points)
+    ranges = tuple(
+        (min(float(point[axis]) for point in values), max(float(point[axis]) for point in values))
+        for axis in range(3)
+    )
+    if requested != "auto":
+        return requested, ranges
+    for plane, discarded_axis in (("xy", 2), ("xz", 1), ("yz", 0)):
+        low, high = ranges[discarded_axis]
+        if high - low <= tolerance_source:
+            return plane, ranges
+    raise DxfProjectionRequired(
+        "A geometria 3D não está contida em um plano XY, XZ ou YZ. "
+        "Escolha explicitamente um plano de projeção antes de importar."
+    )
+
+
+def _project_point(point, plane, to_mm):
+    axes = {"xy": (0, 1), "xz": (0, 2), "yz": (1, 2)}[plane]
+    return Point(float(point[axes[0]]) * to_mm, float(point[axes[1]]) * to_mm)
+
+
+def import_dxf_document(
+    filename,
+    tolerance_mm=0.0127,
+    assumed_units=None,
+    projection_plane="auto",
+) -> JobDocument:
     from ezdxf import units
     from ezdxf.addons.drawing.properties import RenderContext
     from ezdxf.disassemble import recursive_decompose
@@ -154,7 +189,39 @@ def import_dxf_document(filename, tolerance_mm=0.0127, assumed_units=None) -> Jo
     skipped = Counter()
     tolerance_source = tolerance_mm / to_mm
 
+    records = []
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
+        entity_type = entity.dxftype()
+        try:
+            path = make_path(entity)
+            flattened = tuple(path.flattening(distance=tolerance_source, segments=4))
+            if len(flattened) < 2:
+                skipped[entity_type] += 1
+                continue
+            records.append((index, entity, path, flattened))
+        except (TypeError, ValueError, AttributeError, NotImplementedError):
+            skipped[entity_type] += 1
+
+    if not records:
+        raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
+    projection, coordinate_ranges = _select_projection(records, tolerance_source, projection_plane)
+    result.source.metadata["projection_plane"] = projection.upper()
+    discarded_axis = {"xy": 2, "xz": 1, "yz": 0}[projection]
+    discarded_low, discarded_high = coordinate_ranges[discarded_axis]
+    if projection != "xy" or abs(discarded_low) > tolerance_source or abs(discarded_high) > tolerance_source:
+        result.issues.append(
+            ImportIssue(
+                code="dxf.geometry_projected",
+                message="Geometria projetada automaticamente no plano %s." % projection.upper(),
+                severity=IssueSeverity.WARNING,
+                details={
+                    "plane": projection.upper(),
+                    "discarded_range": (discarded_low * to_mm, discarded_high * to_mm),
+                },
+            )
+        )
+
+    for index, entity, path, flattened in records:
         entity_type = entity.dxftype()
         layer_name = _effective_layer_name(entity)
         layer_id = layer_ids.get(layer_name)
@@ -180,13 +247,7 @@ def import_dxf_document(filename, tolerance_mm=0.0127, assumed_units=None) -> Jo
             layer_name=layer_name,
         )
         try:
-            path = make_path(entity)
-            flattened = tuple(path.flattening(distance=tolerance_source, segments=4))
-            if any(abs(float(point[2])) > tolerance_source for point in flattened):
-                raise DxfImportError(
-                    f"A entidade {entity_type} {handle or index} contém geometria 3D fora do plano XY."
-                )
-            points = tuple(Point(float(point[0]) * to_mm, float(point[1]) * to_mm) for point in flattened)
+            points = tuple(_project_point(point, projection, to_mm) for point in flattened)
             segments = tuple(LineSegment(start, end) for start, end in zip(points, points[1:]) if start != end)
             if not segments:
                 skipped[entity_type] += 1

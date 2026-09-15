@@ -4,7 +4,12 @@ import unittest
 
 import ezdxf
 
-from k40core.importers.dxf import DxfImportError, _color_from_ezdxf, import_dxf_document
+from k40core.importers.dxf import (
+    DxfImportError,
+    DxfProjectionRequired,
+    _color_from_ezdxf,
+    import_dxf_document,
+)
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Operation, Unit
 from modern_importers import import_dxf
@@ -110,8 +115,38 @@ class DxfImporterTests(unittest.TestCase):
         drawing.modelspace().add_line((0, 0, 0), (10, 10, 5))
         drawing.saveas(path)
 
-        with self.assertRaisesRegex(DxfImportError, "geometria 3D"):
+        with self.assertRaisesRegex(DxfProjectionRequired, "geometria 3D"):
             import_dxf_document(path)
+
+    def test_xz_drawing_is_detected_and_projected(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        drawing.modelspace().add_line((0, 7, 0), (10, 7, 5))
+        drawing.saveas(path)
+
+        document = import_dxf_document(path)
+
+        self.assertEqual(document.source.metadata["projection_plane"], "XZ")
+        self.assertEqual(document.bounds.min_x, 0.0)
+        self.assertEqual(document.bounds.max_x, 10.0)
+        self.assertEqual(document.bounds.min_y, 0.0)
+        self.assertEqual(document.bounds.max_y, 5.0)
+        self.assertEqual(document.issues[0].code, "dxf.geometry_projected")
+
+    def test_non_planar_geometry_accepts_explicit_xy_projection(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        drawing.modelspace().add_line((0, 0, 0), (10, 10, 5))
+        drawing.saveas(path)
+
+        document = import_dxf_document(path, projection_plane="xy")
+
+        self.assertEqual(document.source.metadata["projection_plane"], "XY")
+        self.assertEqual(document.bounds.max_x, 10.0)
+        self.assertEqual(document.bounds.max_y, 10.0)
+        self.assertEqual(document.issues[0].code, "dxf.geometry_projected")
 
     def test_hidden_layer_is_preserved_but_not_sent_to_legacy_output(self):
         path = self._path()

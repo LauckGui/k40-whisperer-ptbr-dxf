@@ -34,6 +34,7 @@ from ecoords import ECoord
 from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import ModernImporterFallback, import_dxf, probe_dxf_units
+from k40core.importers import DxfProjectionRequired
 from k40core.model import Bounds
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
@@ -2768,11 +2769,22 @@ class Application(Frame):
                 if not assumed_units:
                     return
 
-            imported = import_dxf(
-                self.DXF_FILE,
-                tolerance_inches=.0005,
-                assumed_units=assumed_units,
-            )
+            try:
+                imported = import_dxf(
+                    self.DXF_FILE,
+                    tolerance_inches=.0005,
+                    assumed_units=assumed_units,
+                )
+            except DxfProjectionRequired:
+                projection_dialog = ProjectionDialog(root)
+                if not projection_dialog.result:
+                    return
+                imported = import_dxf(
+                    self.DXF_FILE,
+                    tolerance_inches=.0005,
+                    assumed_units=assumed_units,
+                    projection_plane=projection_dialog.result,
+                )
             self.VcutData.make_ecoords(imported.cut, scale=1.0)
             self.VengData.make_ecoords(imported.engrave, scale=1.0)
             self.Design_bounds = imported.bounds
@@ -6631,6 +6643,28 @@ class UnitsDialog(tkSimpleDialog.Dialog):
     def apply(self):
         self.result = self.uom.get()
         return 
+
+
+class ProjectionDialog(tkSimpleDialog.Dialog):
+    def body(self, master):
+        self.resizable(0, 0)
+        self.title("Projeção DXF")
+        self.iconname("DXF Projection")
+        self.plane = StringVar()
+        self.plane.set("xy")
+
+        Label(
+            master,
+            text="A geometria não está em um plano principal.\nSelecione a vista para projetar:",
+            justify=LEFT,
+        ).grid(row=0, column=0, columnspan=2, sticky=W)
+        Radiobutton(master, text="Superior (XY)", variable=self.plane, value="xy").grid(row=1, sticky=W)
+        Radiobutton(master, text="Frontal (XZ)", variable=self.plane, value="xz").grid(row=2, sticky=W)
+        Radiobutton(master, text="Lateral (YZ)", variable=self.plane, value="yz").grid(row=3, sticky=W)
+
+    def apply(self):
+        self.result = self.plane.get()
+        return
 
 class Stop_ResumeDialog(tkSimpleDialog.Dialog):
     def __init__(self, parent, title):
