@@ -6567,40 +6567,54 @@ class Application(Frame):
 
         editor = Toplevel(self.master)
         editor.title("Editar desenho")
-        editor.geometry("510x355")
-        editor.minsize(510, 355)
+        editor.geometry("510x300")
+        editor.minsize(510, 300)
         editor.resizable(0, 0)
         editor.transient(self.master)
         editor.grab_set()
 
         scale_percent = StringVar(value="100")
+        width_mm = StringVar()
+        height_mm = StringVar()
         angle_degrees = StringVar(value="0")
         summary = StringVar()
+        scale_preview = StringVar()
         message = StringVar()
+        synchronizing = [False]
+        applying = [False]
+        action_buttons = []
 
-        container = Frame(editor, padx=14, pady=12)
+        container = Frame(editor, padx=12, pady=10)
         container.pack(fill=BOTH, expand=1)
-        Label(container, textvariable=summary, anchor=W, justify=LEFT).pack(fill=X, pady=(0, 9))
-        Label(container,
-              text="As transformações usam o centro da peça fonte. Escala uniforme preserva círculos e arcos; cópias procedurais continuam como array.",
-              anchor=W, justify=LEFT, wraplength=470, fg="#4b5563").pack(fill=X, pady=(0, 9))
+        Label(container, textvariable=summary, anchor=W).grid(
+            row=0, column=0, columnspan=5, sticky="ew", pady=(0, 2))
+        Label(container, textvariable=scale_preview, anchor=W, fg="#2563eb").grid(
+            row=1, column=0, columnspan=5, sticky="ew", pady=(0, 7))
+        container.columnconfigure(1, weight=1)
 
-        scale_frame = LabelFrame(container, text="Escala uniforme", padx=9, pady=7)
-        scale_frame.pack(fill=X, pady=(0, 8))
-        Label(scale_frame, text="Escala (%)").grid(row=0, column=0, sticky=W, padx=(0, 6))
-        Entry(scale_frame, textvariable=scale_percent, justify=RIGHT, width=10).grid(
-            row=0, column=1, sticky=W)
+        Label(container, image=self.ui_icons["transform"]).grid(row=2, column=0, rowspan=3, padx=(0, 4))
+        Label(container, text="Escala").grid(row=2, column=1, sticky=W)
+        Entry(container, textvariable=scale_percent, justify=RIGHT, width=9).grid(
+            row=2, column=2, sticky=W, padx=(4, 2))
+        Label(container, text="%").grid(row=2, column=3, sticky=W)
 
-        rotation_frame = LabelFrame(container, text="Rotação", padx=9, pady=7)
-        rotation_frame.pack(fill=X, pady=(0, 8))
-        Label(rotation_frame, text="Ângulo (graus)").grid(row=0, column=0, sticky=W, padx=(0, 6))
-        Entry(rotation_frame, textvariable=angle_degrees, justify=RIGHT, width=10).grid(
-            row=0, column=1, sticky=W)
+        Label(container, text="Largura").grid(row=3, column=1, sticky=W)
+        Entry(container, textvariable=width_mm, justify=RIGHT, width=9).grid(
+            row=3, column=2, sticky=W, padx=(4, 2))
+        Label(container, text="mm").grid(row=3, column=3, sticky=W)
 
-        mirror_frame = LabelFrame(container, text="Espelhamento", padx=9, pady=7)
-        mirror_frame.pack(fill=X, pady=(0, 8))
-        Label(mirror_frame, text="Horizontal inverte esquerda/direita; vertical inverte cima/baixo.",
-              anchor=W, fg="#4b5563").pack(fill=X)
+        Label(container, text="Altura").grid(row=4, column=1, sticky=W)
+        Entry(container, textvariable=height_mm, justify=RIGHT, width=9).grid(
+            row=4, column=2, sticky=W, padx=(4, 2))
+        Label(container, text="mm").grid(row=4, column=3, sticky=W)
+
+        Label(container, image=self.ui_icons["reload"]).grid(row=5, column=0, padx=(0, 4), pady=(7, 0))
+        Label(container, text="Rotação").grid(row=5, column=1, sticky=W, pady=(7, 0))
+        Entry(container, textvariable=angle_degrees, justify=RIGHT, width=9).grid(
+            row=5, column=2, sticky=W, padx=(4, 2), pady=(7, 0))
+        Label(container, text="graus").grid(row=5, column=3, sticky=W, pady=(7, 0))
+
+        Label(container, text="Espelhar").grid(row=6, column=1, sticky=W, pady=(8, 0))
 
         def source_center():
             current = editable_bounds(self.job_document)
@@ -6613,49 +6627,154 @@ class Application(Frame):
             summary.set("Peça fonte: %.2f × %.2f mm%s" % (
                 current.width, current.height, suffix))
 
+        def set_scale_values(width, height):
+            synchronizing[0] = True
+            width_mm.set("%.3f" % width)
+            height_mm.set("%.3f" % height)
+            synchronizing[0] = False
+
+        def update_scale_preview(width, height):
+            scale_preview.set("Bounding box após escala: %.3f × %.3f mm" % (width, height))
+
+        def sync_from_percent(*unused):
+            if synchronizing[0]:
+                return
+            try:
+                current = editable_bounds(self.job_document)
+                factor = float(scale_percent.get().replace(",", "."))/100.0
+                if factor <= 0.0:
+                    raise ValueError
+                set_scale_values(current.width*factor, current.height*factor)
+                update_scale_preview(current.width*factor, current.height*factor)
+                message.set("")
+            except ValueError:
+                scale_preview.set("Informe uma escala positiva.")
+
+        def sync_from_width(*unused):
+            if synchronizing[0]:
+                return
+            try:
+                current = editable_bounds(self.job_document)
+                width = float(width_mm.get().replace(",", "."))
+                if width <= 0.0:
+                    raise ValueError
+                factor = width/current.width
+                synchronizing[0] = True
+                scale_percent.set("%.6g" % (factor*100.0))
+                height_mm.set("%.3f" % (current.height*factor))
+                synchronizing[0] = False
+                update_scale_preview(width, current.height*factor)
+                message.set("")
+            except ValueError:
+                scale_preview.set("Informe uma largura positiva.")
+
+        def sync_from_height(*unused):
+            if synchronizing[0]:
+                return
+            try:
+                current = editable_bounds(self.job_document)
+                height = float(height_mm.get().replace(",", "."))
+                if height <= 0.0:
+                    raise ValueError
+                factor = height/current.height
+                synchronizing[0] = True
+                scale_percent.set("%.6g" % (factor*100.0))
+                width_mm.set("%.3f" % (current.width*factor))
+                synchronizing[0] = False
+                update_scale_preview(current.width*factor, height)
+                message.set("")
+            except ValueError:
+                scale_preview.set("Informe uma altura positiva.")
+
+        def set_actions_enabled(enabled):
+            state = NORMAL if enabled else DISABLED
+            for button in action_buttons:
+                button.configure(state=state)
+
+        def complete_edit(success):
+            applying[0] = False
+            if editor.winfo_exists():
+                set_actions_enabled(True)
+                if success:
+                    refresh_summary()
+                    synchronizing[0] = True
+                    scale_percent.set("100")
+                    angle_degrees.set("0")
+                    synchronizing[0] = False
+                    current = editable_bounds(self.job_document)
+                    set_scale_values(current.width, current.height)
+                    update_scale_preview(current.width, current.height)
+                else:
+                    message.set("Não foi possível aplicar a alteração. Veja o aviso na barra inferior.")
+
         def apply_scale():
             try:
                 factor = float(scale_percent.get().replace(",", "."))/100.0
-                self._apply_document_edit(
+                if factor <= 0.0:
+                    raise ValueError("A escala precisa ser um número positivo.")
+                start_edit(
                     uniform_scale(factor, source_center()),
                     "Escala aplicada: %.2f%%." % (factor*100.0),
                 )
-                editor.destroy()
             except ValueError as exc:
                 message.set(str(exc))
 
         def apply_rotation():
             try:
                 degrees = float(angle_degrees.get().replace(",", "."))
-                self._apply_document_edit(
+                start_edit(
                     rotation(degrees, source_center()),
                     "Rotação aplicada: %.2f°." % degrees,
                 )
-                editor.destroy()
             except ValueError as exc:
                 message.set(str(exc))
 
         def apply_reflection(horizontal):
-            self._apply_document_edit(
+            start_edit(
                 reflection(horizontal, source_center()),
                 "Espelhamento %s aplicado." % ("horizontal" if horizontal else "vertical"),
             )
-            editor.destroy()
 
-        controls = Frame(container)
-        controls.pack(fill=X, pady=(1, 0))
-        Button(controls, text="Aplicar escala", command=apply_scale).pack(side=LEFT)
-        Button(controls, text="Girar", command=apply_rotation).pack(side=LEFT, padx=6)
-        Button(controls, text="Espelhar horizontal", command=lambda: apply_reflection(True)).pack(
-            side=LEFT)
-        Button(controls, text="Espelhar vertical", command=lambda: apply_reflection(False)).pack(
-            side=LEFT, padx=6)
-        Button(container, text="Fechar", width=11, command=editor.destroy).pack(anchor=E, pady=(6, 0))
-        Label(container, textvariable=message, fg="#b42318", anchor=W).pack(fill=X)
+        def start_edit(transform, success_message):
+            if applying[0]:
+                return
+            applying[0] = True
+            set_actions_enabled(False)
+            started = self._apply_document_edit(transform, success_message, complete_edit)
+            if not started:
+                complete_edit(False)
+
+        scale_button = Button(container, text="Aplicar", image=self.ui_icons["transform"],
+                              compound=LEFT, command=apply_scale)
+        scale_button.grid(row=2, column=4, rowspan=3, sticky="ns", padx=(9, 0))
+        rotate_button = Button(container, text="Aplicar", image=self.ui_icons["reload"],
+                               compound=LEFT, command=apply_rotation)
+        rotate_button.grid(row=5, column=4, sticky="ew", padx=(9, 0), pady=(7, 0))
+        mirror_x_button = Button(container, text="Horizontal", image=self.ui_icons["left"],
+                                 compound=LEFT, command=lambda: apply_reflection(True))
+        mirror_x_button.grid(row=6, column=2, columnspan=2, sticky="w", padx=(4, 4), pady=(8, 0))
+        mirror_y_button = Button(container, text="Vertical", image=self.ui_icons["up"],
+                                 compound=LEFT, command=lambda: apply_reflection(False))
+        mirror_y_button.grid(row=6, column=4, sticky="ew", padx=(4, 0), pady=(8, 0))
+        action_buttons.extend((scale_button, rotate_button, mirror_x_button, mirror_y_button))
+        Label(container, text="Escala uniforme preserva círculos e arcos.", fg="#4b5563", anchor=W).grid(
+            row=7, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        close_button = Button(container, text="Fechar", width=9, command=editor.destroy)
+        close_button.grid(
+            row=7, column=4, sticky=E, pady=(8, 0))
+        action_buttons.append(close_button)
+        Label(container, textvariable=message, fg="#b42318", anchor=W).grid(
+            row=8, column=0, columnspan=5, sticky="ew")
+        trace_variable(scale_percent, sync_from_percent)
+        trace_variable(width_mm, sync_from_width)
+        trace_variable(height_mm, sync_from_height)
         refresh_summary()
+        sync_from_percent()
 
-    def _apply_document_edit(self, transform, success_message):
+    def _apply_document_edit(self, transform, success_message, on_complete=None):
         """Mutate canonical transforms then rebuild legacy data off the Tk thread."""
+        if self.job_document is None or self.array_build_thread is not None:
+            return False
         document = self.job_document
         previous = (list(document.vectors), list(document.rasters), list(document.fills))
 
@@ -6673,12 +6792,15 @@ class Application(Frame):
             progress_message="Atualizando desenho editado...",
             success_message=success_message,
             failure_message="Falha ao editar desenho",
+            on_complete=on_complete,
         )
+        return True
 
     def _rebuild_array_legacy_data(self, previous_arrays=None, rollback=None,
                                    progress_message="Preparando múltiplas cópias...",
                                    success_message=None,
-                                   failure_message="Falha ao criar múltiplas cópias"):
+                                   failure_message="Falha ao criar múltiplas cópias",
+                                   on_complete=None):
         if self.job_document is None or self.array_build_thread is not None:
             return
         self.set_gui("disabled")
@@ -6692,6 +6814,7 @@ class Application(Frame):
         self.document_rebuild_rollback = rollback
         self.document_rebuild_success_message = success_message
         self.document_rebuild_failure_message = failure_message
+        self.document_rebuild_on_complete = on_complete
         document = self.job_document
 
         def worker():
@@ -6738,6 +6861,7 @@ class Application(Frame):
         self.array_build_queue = None
         self.set_gui("normal")
         if event == "error":
+            on_complete = self.document_rebuild_on_complete
             if self.document_rebuild_rollback is not None:
                 self.document_rebuild_rollback()
             elif self.array_previous_arrays is not None:
@@ -6747,6 +6871,10 @@ class Application(Frame):
             self.statusbar.configure(bg='red')
             self.statusMessage.set("%s: %s" % (self.document_rebuild_failure_message, payload))
             self.document_rebuild_failure_message = None
+            self.document_rebuild_success_message = None
+            self.document_rebuild_on_complete = None
+            if on_complete is not None:
+                on_complete(False)
             return
 
         self.VcutData, self.VengData, raster_image, raster_dpi = payload
@@ -6759,8 +6887,11 @@ class Application(Frame):
             self.SCALE = 0
         self.array_previous_arrays = None
         success_message = self.document_rebuild_success_message
+        on_complete = self.document_rebuild_on_complete
         self.document_rebuild_rollback = None
         self.document_rebuild_success_message = None
+        self.document_rebuild_failure_message = None
+        self.document_rebuild_on_complete = None
         bounds = self.job_document.bounds
         if bounds is not None:
             self.Design_bounds = (
@@ -6782,6 +6913,8 @@ class Application(Frame):
         else:
             self.statusMessage.set("Múltiplas cópias aplicadas: %d peças." % total)
         self.menu_View_Refresh(incremental=True)
+        if on_complete is not None:
+            on_complete(True)
 
     def JOB_Settings_Window(self):
         if self.GUI_Disabled:
