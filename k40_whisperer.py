@@ -5204,9 +5204,8 @@ class Application(Frame):
                 self.Open_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
                 self.Reload_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 Yloc=Yloc+standard_button_h+4
-                self.Array_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
-                Yloc=Yloc+standard_button_h+4
-                self.Edit_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
+                self.Edit_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
+                self.Array_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
                     self.separator1.place(x=8, y=Yloc, width=334, height=1)
