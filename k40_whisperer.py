@@ -34,6 +34,8 @@ from ecoords import ECoord
 from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import ModernImporterFallback, import_dxf, probe_dxf_units
+from k40core.model import Bounds
+from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
 import inkex
 import simplestyle
@@ -2782,8 +2784,12 @@ class Application(Frame):
             # não consegue representar com segurança.
             pass
         except Exception as exc:
-            msg = "O leitor DXF moderno falhou; tentando o leitor compatível.\n%s" % exc
-            debug_message(msg)
+            msg = "A importação DXF foi interrompida para evitar geometria incorreta:\n%s" % exc
+            self.statusMessage.set(str(exc).split("\n")[0])
+            self.statusbar.configure(bg='red')
+            message_box("Falha ao carregar DXF", msg)
+            debug_message(traceback.format_exc())
+            return
 
         dxf_import=DXF_CLASS()
         tolerance = .0005
@@ -3941,6 +3947,33 @@ class Application(Frame):
             self.statusMessage.set("A máquina laser não foi inicializada...")
             self.statusbar.configure( bg = 'red' ) 
             return
+        if output_filename is None:
+            try:
+                xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+                x_scale = abs(float(self.LaserXscale.get()))
+                y_scale = abs(float(self.LaserYscale.get()))
+                if self.rotary.get():
+                    y_scale *= abs(float(self.LaserRscale.get()))
+                width = (xmax - xmin) * x_scale
+                height = (ymax - ymin) * y_scale
+                machine_width, machine_height = self.LASER_Size()
+                anchor_x = self.laserX + self.pos_offset[0] / 1000.0
+                anchor_y = self.laserY + self.pos_offset[1] / 1000.0
+                job_bounds = placed_job_bounds(
+                    width * 25.4,
+                    height * 25.4,
+                    anchor_x * 25.4,
+                    anchor_y * 25.4,
+                    home_on_right=bool(self.HomeUR.get()),
+                )
+                machine_bounds = Bounds(0.0, -machine_height * 25.4,
+                                        machine_width * 25.4, 0.0)
+                validate_work_area(job_bounds, machine_bounds)
+            except (ValueError, WorkAreaError) as exc:
+                self.statusMessage.set(str(exc))
+                self.statusbar.configure(bg='red')
+                message_box("Trabalho fora da área útil", str(exc))
+                return
         try:
             feed_factor=self.feed_factor()
             

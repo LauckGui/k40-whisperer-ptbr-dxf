@@ -2,6 +2,8 @@ import unittest
 
 from k40core.model import (
     AffineTransform,
+    ArcSegment,
+    Bounds,
     ImportSource,
     JobDocument,
     Layer,
@@ -63,6 +65,12 @@ class JobModelTests(unittest.TestCase):
         document = JobDocument(ImportSource("job.test", "test", "fixture"), [layer], rasters=[raster])
 
         self.assertEqual(document.objects_for_operation(Operation.RASTER_ENGRAVE), [raster])
+
+    def test_arc_bounds_use_a_conservative_safety_envelope(self):
+        arc = ArcSegment(Point(10, 0), Point(0, 10), Point(0, 0))
+        path = VectorPath((arc,))
+
+        self.assertEqual(path.bounds, Bounds(-10, -10, 10, 10))
 
 
 if __name__ == "__main__":

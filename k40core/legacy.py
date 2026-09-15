@@ -6,8 +6,9 @@ from .model import JobDocument, LineSegment, Operation
 def vector_lines_in_inches(document: JobDocument, operation: Operation) -> list[list[float]]:
     """Retorna linhas no formato [x0, y0, x1, y1] esperado por ECoord."""
     lines = []
+    visible_layers = {layer.id for layer in document.layers if layer.visible}
     for vector in document.vectors:
-        if vector.operation is not operation:
+        if vector.operation is not operation or not vector.style.visible or vector.layer_id not in visible_layers:
             continue
         for path in vector.paths:
             for segment in path.segments:

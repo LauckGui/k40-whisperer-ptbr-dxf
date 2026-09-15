@@ -158,7 +158,17 @@ class ArcSegment:
 
     @property
     def points(self) -> tuple[Point, ...]:
-        return (self.start, self.end, self.center)
+        # Envelope conservador do círculo que contém o arco. Continua seguro
+        # sob transformações afins, ainda que possa superestimar arcos parciais.
+        radius = math.hypot(self.start.x - self.center.x, self.start.y - self.center.y)
+        return (
+            self.start,
+            self.end,
+            Point(self.center.x - radius, self.center.y - radius),
+            Point(self.center.x - radius, self.center.y + radius),
+            Point(self.center.x + radius, self.center.y - radius),
+            Point(self.center.x + radius, self.center.y + radius),
+        )
 
 
 @dataclass(frozen=True)

@@ -68,3 +68,17 @@ O parser legado lia centros de círculos diretamente em OCS. Entidades com
 normal negativa no eixo Z eram posicionadas com o X invertido. O importador
 `ezdxf` aplica a transformação OCS → WCS e passou a ser usado primeiro pelo
 fluxo `Open_DXF`; o comportamento está protegido por teste automatizado.
+
+O importador também resolve herança de camada e cor em blocos `INSERT`, respeita
+cores True Color e mantém layers ocultos fora da saída enviada ao backend
+legado. Geometria com coordenada Z relevante é rejeitada em vez de ser projetada
+silenciosamente no plano da máquina.
+
+Falhas inesperadas do leitor moderno interrompem a abertura com uma mensagem de
+erro. O parser antigo só pode ser usado quando o importador declarar
+explicitamente uma incompatibilidade segura para fallback.
+
+Antes do envio físico, largura, altura e posição do trabalho — incluindo
+calibração, rotativo, origem e deslocamento — são comparadas com a área útil
+configurada. A geração de arquivo EGV continua permitida sem essa restrição,
+pois não movimenta equipamento.

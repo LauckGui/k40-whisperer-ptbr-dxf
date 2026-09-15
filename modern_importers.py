@@ -71,14 +71,11 @@ def probe_dxf_units(filename):
 
 
 def import_dxf(filename, tolerance_inches=0.0005, assumed_units=None):
-    try:
-        document = import_dxf_document(
-            filename,
-            tolerance_mm=tolerance_inches * 25.4,
-            assumed_units=assumed_units,
-        )
-    except DxfImportError as exc:
-        raise ModernImporterFallback(str(exc)) from exc
+    document = import_dxf_document(
+        filename,
+        tolerance_mm=tolerance_inches * 25.4,
+        assumed_units=assumed_units,
+    )
 
     result = ImportResult(
         cut=vector_lines_in_inches(document, Operation.VECTOR_CUT),
@@ -87,14 +84,9 @@ def import_dxf(filename, tolerance_inches=0.0005, assumed_units=None):
         importer=document.source.importer,
         document=document,
     )
-    bounds = document.bounds
-    if bounds is not None:
-        result.bounds = (
-            bounds.min_x / 25.4,
-            bounds.max_x / 25.4,
-            bounds.min_y / 25.4,
-            bounds.max_y / 25.4,
-        )
+    if not result.cut and not result.engrave:
+        raise DxfImportError("O DXF não contém geometria visível para corte ou gravação.")
+    result.bounds = _bounds(result.cut, result.engrave)
     return result
 
 
