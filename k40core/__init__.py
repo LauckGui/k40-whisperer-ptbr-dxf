@@ -9,6 +9,7 @@ from .model import (
     FillObject,
     ImportIssue,
     ImportSource,
+    InstanceArray,
     IssueSeverity,
     JobDocument,
     Layer,

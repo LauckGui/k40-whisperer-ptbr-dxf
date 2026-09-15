@@ -70,6 +70,11 @@ Escopo:
 5. Reutilizar resultados geométricos e preparar otimização de rota por peça.
 6. Permitir transformar, habilitar e remover o array sem alterar a base.
 
+Estado atual: primeira versão implementada com grade, zig-zag, desvios manuais,
+preenchimento da área disponível, preview leve e expansão assíncrona na fronteira
+legada. Falta validar o fluxo visual com trabalhos reais e avançar a reutilização
+de rotas para evitar materialização proporcional no backend antigo.
+
 **Critério de conclusão:** centenas de cópias usam uma única geometria-base,
 continuam editáveis e não provocam crescimento proporcional do modelo canônico.
 

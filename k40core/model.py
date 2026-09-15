@@ -353,6 +353,36 @@ class ImportIssue:
     details: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class InstanceArray:
+    """Procedural rectangular or staggered repetition of source objects."""
+
+    id: str
+    object_ids: tuple[str, ...]
+    columns: int = 1
+    rows: int = 1
+    spacing_mm: float = 0.0
+    mode: str = "grid"
+    stagger_x_mm: float = 0.0
+    row_adjust_y_mm: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.object_ids:
+            raise ValueError("Um array precisa referenciar ao menos um objeto.")
+        if len(self.object_ids) != len(set(self.object_ids)):
+            raise ValueError("Um objeto só pode aparecer uma vez no mesmo array.")
+        if self.columns < 1 or self.rows < 1:
+            raise ValueError("Linhas e colunas do array precisam ser positivas.")
+        if self.mode not in {"grid", "staggered"}:
+            raise ValueError("Modo de array inválido.")
+        if not all(math.isfinite(value) for value in (
+            self.spacing_mm, self.stagger_x_mm, self.row_adjust_y_mm
+        )):
+            raise ValueError("Parâmetros do array precisam ser finitos.")
+        if self.spacing_mm < 0.0:
+            raise ValueError("O espaçamento do array não pode ser negativo.")
+
+
 @dataclass
 class JobDocument:
     source: ImportSource
@@ -361,17 +391,28 @@ class JobDocument:
     rasters: list[RasterObject] = field(default_factory=list)
     fills: list[FillObject] = field(default_factory=list)
     issues: list[ImportIssue] = field(default_factory=list)
+    arrays: list[InstanceArray] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 1
     unit: Unit = Unit.MILLIMETER
 
     @property
     def bounds(self) -> Optional[Bounds]:
-        return Bounds.union(
+        base = Bounds.union(
             [item.bounds for item in self.vectors]
             + [item.bounds for item in self.rasters]
             + [item.bounds for item in self.fills]
         )
+        if base is None or not self.arrays:
+            return base
+        from .arrays import instance_array_bounds
+        object_bounds = {
+            item.id: item.bounds
+            for item in [*self.vectors, *self.rasters, *self.fills]
+        }
+        return Bounds.union([base] + [
+            instance_array_bounds(array, object_bounds) for array in self.arrays
+        ])
 
     def validate(self) -> None:
         if self.schema_version < 1:
@@ -392,6 +433,19 @@ class JobDocument:
         for item in [*self.vectors, *self.rasters, *self.fills]:
             if item.layer_id not in known_layers:
                 raise ValueError(f"Objeto {item.id!r} referencia uma camada inexistente.")
+        known_objects = set(object_ids)
+        array_ids = [item.id for item in self.arrays]
+        if len(array_ids) != len(set(array_ids)):
+            raise ValueError("IDs de array duplicados.")
+        claimed_objects = set()
+        for array in self.arrays:
+            unknown = set(array.object_ids)-known_objects
+            if unknown:
+                raise ValueError("Array referencia objetos inexistentes: %s" % sorted(unknown))
+            overlap = claimed_objects.intersection(array.object_ids)
+            if overlap:
+                raise ValueError("Um objeto não pode pertencer a dois arrays.")
+            claimed_objects.update(array.object_ids)
 
     def objects_for_operation(self, operation: Operation) -> list[Union[VectorObject, RasterObject, FillObject]]:
         return [item for item in [*self.vectors, *self.rasters, *self.fills] if item.operation is operation]

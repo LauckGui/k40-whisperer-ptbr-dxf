@@ -34,7 +34,9 @@ from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
 from k40core.configuration import ConfigurationError, load_configuration, save_configuration
-from k40core.model import Bounds
+from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
+from k40core.legacy import vector_lines_in_inches
+from k40core.model import Bounds, InstanceArray, Operation
 from k40core.preview import iter_preview_polylines, transparent_raster_preview
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
@@ -136,6 +138,10 @@ class Application(Frame):
         self.preview_render_generation = 0
         self.preview_line_buffer = None
         self.preview_render_active = False
+        self.job_document = None
+        self.array_build_thread = None
+        self.array_build_queue = None
+        self.array_previous_arrays = None
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -156,6 +162,7 @@ class Application(Frame):
         self.SCALE = 1
         self.Design_bounds = (0,0,0,0)
         self.UI_image = None
+        self.job_document = None
         #if self.HomeUR.get():
         self.move_head_window_temporary([0.0,0.0])
         #else:
@@ -744,6 +751,9 @@ class Application(Frame):
 
         self.Open_Button       = Button(self.master,text="Abrir Vetor", command=self.menu_File_Open_Design)
         self.Reload_Button     = Button(self.master,text="Recarregar Vetor", command=self.menu_Reload_Design)
+        self.Array_Button      = Button(self.master, text="Múltiplas Cópias",
+                                        command=self.MULTIPLE_COPIES_Window,
+                                        relief=FLAT, bd=0)
         
         self.Home_Button       = Button(self.master,text="Origem",          command=self.Home)
         self.UnLock_Button     = Button(self.master,text="Liberar eixos",   command=self.Unlock)
@@ -834,6 +844,7 @@ class Application(Frame):
         self.Pause_Button.configure(image=self.ui_icons["pause"], compound=LEFT)
         self.Stop_Button.configure(image=self.ui_icons["stop"], compound=LEFT, fg="white")
         for button in (self.Initialize_Button, self.Open_Button, self.Reload_Button,
+                       self.Array_Button,
                        self.Home_Button, self.UnLock_Button, self.GoTo_Button,
                        self.Run_Button, self.Pause_Button, self.Stop_Button):
             button.configure(padx=7, pady=2)
@@ -2993,6 +3004,7 @@ class Application(Frame):
                     self.DESIGN_FILE = filename
                     self.VcutData = vcut_data
                     self.VengData = veng_data
+                    self.job_document = imported.document
                     if imported.raster_image is not None:
                         self.RengData.set_image(imported.raster_image)
                         self.input_dpi = imported.raster_dpi
@@ -4990,6 +5002,8 @@ class Application(Frame):
 
                 self.Open_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
                 self.Reload_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
+                Yloc=Yloc+standard_button_h+4
+                self.Array_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
                     self.separator1.place(x=8, y=Yloc, width=334, height=1)
@@ -6014,6 +6028,260 @@ class Application(Frame):
     ################################################################################
     #                       Job and Design Settings Window                        #
     ################################################################################
+    def MULTIPLE_COPIES_Window(self):
+        if self.GUI_Disabled:
+            return
+        if self.job_document is None or not self.job_document.vectors:
+            self.statusbar.configure(bg='yellow')
+            self.statusMessage.set("Importe um DXF vetorial antes de criar múltiplas cópias.")
+            return
+
+        document = self.job_document
+        base_bounds = Bounds.union(item.bounds for item in document.vectors)
+        if base_bounds is None or base_bounds.width <= 0.0 or base_bounds.height <= 0.0:
+            self.statusMessage.set("O desenho atual não possui dimensões válidas para um array.")
+            return
+
+        existing = document.arrays[0] if document.arrays else None
+        copies = Toplevel(self.master)
+        copies.title("Múltiplas Cópias")
+        copies.geometry("640x590")
+        copies.minsize(640, 590)
+        copies.resizable(0, 0)
+        copies.transient(self.master)
+        copies.grab_set()
+
+        mode = StringVar(value=existing.mode if existing else "grid")
+        columns = StringVar(value=str(existing.columns if existing else 2))
+        rows = StringVar(value=str(existing.rows if existing else 2))
+        spacing = StringVar(value="%.3f" % (existing.spacing_mm if existing else 2.0))
+        default_stagger = (base_bounds.width + float(spacing.get())) / 2.0
+        stagger_x = StringVar(value="%.3f" % (
+            existing.stagger_x_mm if existing else default_stagger
+        ))
+        row_adjust_y = StringVar(value="%.3f" % (
+            existing.row_adjust_y_mm if existing else 0.0
+        ))
+        summary = StringVar()
+        warning = StringVar()
+
+        container = Frame(copies, padx=16, pady=14)
+        container.pack(fill=BOTH, expand=1)
+
+        mode_frame = LabelFrame(container, text="Modo de distribuição", padx=10, pady=7)
+        mode_frame.pack(fill=X, pady=(0, 8))
+        Radiobutton(mode_frame, text="Grade", variable=mode, value="grid").pack(
+            side=LEFT, padx=(4, 30))
+        Radiobutton(mode_frame, text="Zig-zag compacto", variable=mode,
+                    value="staggered").pack(side=LEFT)
+
+        values = LabelFrame(container, text="Distribuição", padx=10, pady=8)
+        values.pack(fill=X, pady=(0, 8))
+        labels = (
+            ("Colunas", columns), ("Linhas", rows),
+            ("Espaçamento entre peças (mm)", spacing),
+            ("Desvio X da linha alternada (mm)", stagger_x),
+            ("Ajuste Y entre linhas (mm)", row_adjust_y),
+        )
+        entries = []
+        for index, (text_value, variable) in enumerate(labels):
+            Label(values, text=text_value, anchor=W).grid(
+                row=index, column=0, sticky="w", padx=4, pady=3)
+            entry = Entry(values, textvariable=variable, justify=RIGHT, width=14)
+            entry.grid(row=index, column=1, sticky="e", padx=4, pady=3)
+            entries.append(entry)
+        values.columnconfigure(0, weight=1)
+
+        preview = Canvas(container, width=580, height=210, bg="#d4d4d4",
+                         highlightthickness=1, highlightbackground="#9aa0a6")
+        preview.pack(fill=X, pady=(0, 7))
+        Label(container, textvariable=summary, anchor=W).pack(fill=X)
+        warning_label = Label(container, textvariable=warning, anchor=W, fg="#b42318")
+        warning_label.pack(fill=X, pady=(2, 7))
+
+        def values_from_ui():
+            column_count = int(columns.get())
+            row_count = int(rows.get())
+            gap = float(spacing.get().replace(",", "."))
+            stagger = float(stagger_x.get().replace(",", "."))
+            adjust_y = float(row_adjust_y.get().replace(",", "."))
+            if column_count < 1 or row_count < 1:
+                raise ValueError("Linhas e colunas precisam ser maiores que zero.")
+            if column_count*row_count > 10000:
+                raise ValueError("O limite desta versão é de 10.000 cópias.")
+            return InstanceArray(
+                "array:main", tuple(item.id for item in document.vectors),
+                columns=column_count, rows=row_count, spacing_mm=gap,
+                mode=mode.get(), stagger_x_mm=stagger,
+                row_adjust_y_mm=adjust_y,
+            )
+
+        def refresh_preview(*unused):
+            preview.delete(ALL)
+            is_staggered = mode.get() == "staggered"
+            entries[3].configure(state=NORMAL if is_staggered else DISABLED)
+            entries[4].configure(state=NORMAL if is_staggered else DISABLED)
+            try:
+                array = values_from_ui()
+                from k40core.arrays import instance_offsets
+                offsets = list(instance_offsets(array, base_bounds))
+                result_bounds = instance_array_bounds(
+                    array, {item.id: item.bounds for item in document.vectors}
+                )
+                canvas_width = int(preview.cget("width"))
+                canvas_height = int(preview.cget("height"))
+                scale = max(result_bounds.width/max(1, canvas_width-20),
+                            result_bounds.height/max(1, canvas_height-20), 1e-9)
+                shown = offsets[:500]
+                for offset_x, offset_y in shown:
+                    x0 = 10+(base_bounds.min_x+offset_x-result_bounds.min_x)/scale
+                    y0 = 10+(base_bounds.min_y+offset_y-result_bounds.min_y)/scale
+                    x1 = 10+(base_bounds.max_x+offset_x-result_bounds.min_x)/scale
+                    y1 = 10+(base_bounds.max_y+offset_y-result_bounds.min_y)/scale
+                    preview.create_rectangle(x0, y0, x1, y1, outline="#b42318")
+                total = array.columns*array.rows
+                step_x, step_y = array_steps(array, base_bounds)
+                summary.set(
+                    "%d cópias | passo X %.2f mm | passo Y %.2f mm | área %.2f × %.2f mm" %
+                    (total, step_x, step_y, result_bounds.width, result_bounds.height)
+                )
+                machine_factor = 1.0 if self.units.get() == "mm" else 25.4
+                machine_width = float(self.LaserXsize.get())*machine_factor
+                machine_height = float(self.LaserYsize.get())*machine_factor
+                messages = []
+                if result_bounds.width > machine_width or result_bounds.height > machine_height:
+                    messages.append("O array ultrapassa a área útil configurada.")
+                if total > len(shown):
+                    messages.append("Prévia simplificada às primeiras 500 cópias.")
+                warning.set(" ".join(messages))
+                return array
+            except (ValueError, TypeError) as exc:
+                summary.set("")
+                warning.set(str(exc))
+                return None
+
+        def fill_available():
+            try:
+                gap = float(spacing.get().replace(",", "."))
+                stagger = float(stagger_x.get().replace(",", "."))
+                adjust_y = float(row_adjust_y.get().replace(",", "."))
+                machine_factor = 1.0 if self.units.get() == "mm" else 25.4
+                calculated = maximum_array_counts(
+                    base_bounds,
+                    float(self.LaserXsize.get())*machine_factor,
+                    float(self.LaserYsize.get())*machine_factor,
+                    gap, mode.get(), stagger, adjust_y,
+                )
+                columns.set(str(calculated[0]))
+                rows.set(str(calculated[1]))
+                refresh_preview()
+            except (ValueError, TypeError) as exc:
+                warning.set(str(exc))
+
+        def reset_stagger():
+            try:
+                gap = float(spacing.get().replace(",", "."))
+                stagger_x.set("%.3f" % ((base_bounds.width+gap)/2.0))
+                row_adjust_y.set("0.000")
+            except ValueError:
+                warning.set("Informe um espaçamento válido.")
+
+        def apply():
+            array = refresh_preview()
+            if array is None:
+                return
+            previous_arrays = list(document.arrays)
+            document.arrays[:] = [] if array.columns*array.rows == 1 else [array]
+            document.validate()
+            copies.destroy()
+            self._rebuild_array_legacy_data(previous_arrays)
+
+        def remove():
+            previous_arrays = list(document.arrays)
+            document.arrays.clear()
+            copies.destroy()
+            self._rebuild_array_legacy_data(previous_arrays)
+
+        controls = Frame(container)
+        controls.pack(fill=X, pady=(2, 0))
+        Button(controls, text="Preencher área disponível", command=fill_available).pack(
+            side=LEFT, padx=(0, 6))
+        Button(controls, text="Restaurar encaixe padrão", command=reset_stagger).pack(
+            side=LEFT)
+        Button(controls, text="Aplicar", width=11, command=apply).pack(side=RIGHT)
+        Button(controls, text="Cancelar", width=11, command=copies.destroy).pack(
+            side=RIGHT, padx=6)
+        Button(controls, text="Remover cópias", width=14, command=remove).pack(side=RIGHT)
+
+        for variable in (mode, columns, rows, spacing, stagger_x, row_adjust_y):
+            trace_variable(variable, refresh_preview)
+        refresh_preview()
+
+    def _rebuild_array_legacy_data(self, previous_arrays=None):
+        if self.job_document is None or self.array_build_thread is not None:
+            return
+        self.set_gui("disabled")
+        self.statusbar.configure(bg='#f0ad4e')
+        self.statusMessage.set("Preparando múltiplas cópias...")
+        self.import_progress.configure(mode="indeterminate", maximum=100, value=0)
+        self.import_progress.pack(anchor=SW, fill=X, side=BOTTOM, padx=2, pady=(1, 0))
+        self.import_progress.start(12)
+        self.array_build_queue = queue.Queue()
+        self.array_previous_arrays = previous_arrays
+        document = self.job_document
+
+        def worker():
+            try:
+                cut_lines = vector_lines_in_inches(document, Operation.VECTOR_CUT)
+                engrave_lines = vector_lines_in_inches(document, Operation.VECTOR_ENGRAVE)
+                cut_data, engrave_data = ECoord(), ECoord()
+                cut_data.make_ecoords(cut_lines, scale=1.0)
+                engrave_data.make_ecoords(engrave_lines, scale=1.0)
+                self.array_build_queue.put(("complete", (cut_data, engrave_data)))
+            except Exception as exc:
+                self.array_build_queue.put(("error", exc))
+
+        self.array_build_thread = threading.Thread(
+            target=worker, name="k40-array-build", daemon=True
+        )
+        self.array_build_thread.start()
+        self.master.after(50, self._poll_array_build)
+
+    def _poll_array_build(self):
+        try:
+            event, payload = self.array_build_queue.get_nowait()
+        except queue.Empty:
+            if self.array_build_thread is not None:
+                self.master.after(50, self._poll_array_build)
+            return
+
+        self.import_progress.stop()
+        self.import_progress.pack_forget()
+        self.array_build_thread = None
+        self.array_build_queue = None
+        self.set_gui("normal")
+        if event == "error":
+            if self.array_previous_arrays is not None:
+                self.job_document.arrays[:] = self.array_previous_arrays
+            self.array_previous_arrays = None
+            self.statusbar.configure(bg='red')
+            self.statusMessage.set("Falha ao criar múltiplas cópias: %s" % payload)
+            return
+
+        self.VcutData, self.VengData = payload
+        self.array_previous_arrays = None
+        bounds = self.job_document.bounds
+        if bounds is not None:
+            self.Design_bounds = (
+                bounds.min_x/25.4, bounds.max_x/25.4,
+                bounds.min_y/25.4, bounds.max_y/25.4,
+            )
+        total = (self.job_document.arrays[0].columns*self.job_document.arrays[0].rows
+                 if self.job_document.arrays else 1)
+        self.statusbar.configure(bg='white')
+        self.statusMessage.set("Múltiplas cópias aplicadas: %d peças." % total)
+        self.menu_View_Refresh(incremental=True)
+
     def JOB_Settings_Window(self):
         if self.GUI_Disabled:
             return

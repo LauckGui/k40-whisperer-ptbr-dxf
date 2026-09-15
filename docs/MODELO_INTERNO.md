@@ -145,6 +145,19 @@ Essa arquitetura também prepara o futuro array procedural: uma instância poder
 referenciar a mesma geometria-base e aplicar apenas sua transformação, sem gerar
 cópias vetoriais durante importação ou preparação.
 
+## Arrays procedurais
+
+`InstanceArray` referencia os IDs dos objetos-base e armazena somente linhas,
+colunas, modo, espaçamento e ajustes de deslocamento. Grade e zig-zag compartilham
+a mesma geometria; a linha alternada do zig-zag recebe um desvio X configurável e
+o avanço vertical aceita ajuste Y. O objeto original é sempre a primeira cópia.
+
+Limites e preenchimento da área útil são calculados diretamente pelas
+transformações das instâncias. A janela **Múltiplas Cópias** usa envelopes leves
+para atualizar o encaixe sem clonar os vetores. A expansão em coordenadas ocorre
+somente na fronteira legada, em uma thread de trabalho, enquanto o documento
+canônico continua contendo uma única geometria-base.
+
 ## Configuração persistente
 
 As preferências são gravadas atomicamente em `k40_whisperer.config.json`, com
