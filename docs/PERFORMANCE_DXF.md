@@ -36,6 +36,19 @@ preview, rotas e backends. Ela permanece serial: no arquivo real de referência,
 toda a adaptação legada custa cerca de 0,68 s, tornando threads ou processos mais
 caros que o trabalho que tentariam acelerar.
 
+## Preparação das linhas raster
+
+A extração legada percorria cada pixel em Python e recalculava o casco convexo
+após cada linha de varredura. Em imagens grandes, o botão de estimativa podia
+parecer travado. A implementação atual detecta transições claro/escuro com NumPy,
+gera somente os intervalos em que o laser fica ligado e calcula o casco uma única
+vez ao final. Um bitmap sintético de 10.000 × 5.000 pixels (50 megapixels) foi
+processado localmente em aproximadamente 0,47 s, produzindo 4.801 linhas de
+varredura e 9.602 coordenadas.
+
+Falhas na preparação agora retornam estado de erro ao chamador; a interface não
+substitui mais uma mensagem de falha por uma confirmação incorreta de cálculo.
+
 O cancelamento não consegue interromper o interior de `ezdxf.readfile`; ele é
 aplicado assim que essa chamada retorna. A interface, porém, continua responsiva.
 

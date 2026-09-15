@@ -39,6 +39,7 @@ from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
 from k40core.preview import iter_preview_polylines, transparent_raster_preview
 from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
+from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
 import inkex
@@ -2614,7 +2615,7 @@ class Application(Frame):
     #####################################################################
     def make_raster_coords(self):
         if self.RengData.rpaths:
-            return
+            return True
         try:
             hcoords=[]
             if (self.RengData.image != None and self.RengData.ecoords==[]):
@@ -2673,85 +2674,29 @@ class Application(Frame):
                     image_name = os.path.expanduser("~")+"/IMAGE.png"
                     image_temp.save(image_name,"PNG")
 
-                Reng_np = image_temp.load()
                 wim,him = image_temp.size
-                del image_temp
                 #######################################
-                x=0
-                y=0
-                loop=1
-                LENGTH=0
-                n_scanlines = 0 
-                
-                my_hull = hull2D()
-                bignumber = 9999999;
                 Raster_step = int(self.get_raster_step_1000in())
-                timestamp=0
-                im_height_mils = int(him/self.input_dpi*1000.0)
-                for i_step in range(0,im_height_mils,Raster_step):
-                    i=floor(i_step*self.input_dpi/1000.0)
-                    #print(i_step,i)
-                    stamp=int(3*time()) #update every 1/3 of a second
-                    if (stamp != timestamp):
-                        timestamp=stamp #interlock
-                        self.statusMessage.set("Criando linhas de varredura: %.1f %%" %( (100.0*i)/him ) )
-                        self.master.update()
-                    if self.stop[0]==True:
-                        raise Exception("Action stopped by User.")
-                    line = []
-                    cnt=1
-                    LEFT  = bignumber;
-                    RIGHT =-bignumber;
-                    for j in range(1,wim):
-                        if (Reng_np[j,i] == Reng_np[j-1,i]):
-                            cnt = cnt+1
-                        else:
-                            if Reng_np[j-1,i]:
-                                laser = "U"
-                            else:
-                                laser = "D"
-                                LEFT  = min(j-cnt,LEFT)
-                                RIGHT = max(j,RIGHT)
-                                
-                            line.append((cnt,laser))
-                            cnt=1
-                    if Reng_np[j-1,i] > cutoff:
-                        laser = "U"
-                    else:
-                        laser = "D"
-                        LEFT  = min(j-cnt,LEFT)
-                        RIGHT = max(j,RIGHT)
-                        
-                    line.append((cnt,laser))
-                    if LEFT != bignumber and RIGHT != -bignumber:
-                        LENGTH = LENGTH + (RIGHT - LEFT)/self.input_dpi
-                        n_scanlines = n_scanlines + 1
-                    
-                    y=(im_height_mils-i_step)/1000.0
-                    x=0
-                    if LEFT != bignumber:
-                        hcoords.append([LEFT/self.input_dpi,y])
-                    if RIGHT != -bignumber:
-                        hcoords.append([RIGHT/self.input_dpi,y])
-                    if hcoords!=[]:
-                        hcoords = my_hull.convexHullecoords(hcoords)
-                        
-                    rng = list(range(0,len(line),1))
-                        
-                    for i in rng:
-                        seg = line[i]
-                        delta = seg[0]/self.input_dpi
-                        if seg[1]=="D":
-                            loop=loop+1
-                            ecoords.append([x      ,y,loop])
-                            ecoords.append([x+delta,y,loop])
-                        x = x + delta
+                scanlines = extract_scanlines(
+                    image_temp, self.input_dpi, Raster_step, cutoff=cutoff,
+                    cancelled=lambda: self.stop[0] == True,
+                    progress=lambda percent: (
+                        self.statusMessage.set("Criando linhas de varredura: %.1f %%" % percent),
+                        self.master.update(),
+                    ),
+                )
+                del image_temp
+                ecoords = scanlines.ecoords
+                hcoords = scanlines.hull_points
+                if hcoords:
+                    hcoords = hull2D().convexHullecoords(hcoords)
                 self.RengData.set_ecoords(ecoords,data_sorted=True)
-                self.RengData.len=LENGTH
-                self.RengData.n_scanlines = n_scanlines
+                self.RengData.len=scanlines.length_inches
+                self.RengData.n_scanlines = scanlines.scanline_count
             #Set Flag indicating raster paths have been calculated    
             self.RengData.rpaths = True
             self.RengData.hull_coords = hcoords
+            return True
         
         except MemoryError as e:
             msg1 = "Erro de memória:"
@@ -2760,6 +2705,7 @@ class Application(Frame):
             self.statusbar.configure( bg = 'red' )
             message_box(msg1, msg2)
             debug_message(traceback.format_exc())
+            return False
             
         except Exception as e:
             msg1 = "Criação das coordenadas raster interrompida: "
@@ -2768,6 +2714,7 @@ class Application(Frame):
             self.statusbar.configure( bg = 'red' )
             message_box(msg1, msg2)
             debug_message(traceback.format_exc())
+            return False
     #######################################################################
 
 
@@ -4864,12 +4811,13 @@ class Application(Frame):
         self.include_Time.set(1)
         self.set_gui("disabled")
         self.stop[0]=False
-        self.make_raster_coords()
+        calculated = self.make_raster_coords()
         self.stop[0]=True
         self.refreshTime()
         self.set_gui("normal")
         self.menu_View_Refresh()
-        self.statusMessage.set("Tempo estimado calculado: %s" % self.Reng_time.get())
+        if calculated:
+            self.statusMessage.set("Tempo estimado calculado: %s" % self.Reng_time.get())
         
 
     def menu_Help_About(self):
