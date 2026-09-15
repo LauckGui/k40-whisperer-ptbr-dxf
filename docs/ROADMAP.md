@@ -37,6 +37,7 @@ Já concluído:
 - instrumentação por fase;
 - uma única decomposição das entidades e preservação de curvas analíticas;
 - discretização de curvas somente na fronteira legada.
+- discretização adaptativa por desvio geométrico máximo para arcos e Béziers.
 
 Pendente para encerrar o marco:
 
@@ -142,7 +143,6 @@ transformações criado para arrays.
 - backend GRBL;
 - preservação procedural de blocos DXF;
 - cache automático de arquivos importados;
-- tolerância adaptativa de curvas;
 - edição vetorial avançada de nós e curvas;
 - biblioteca extensa de materiais e presets;
 - fila ou histórico completo de trabalhos;

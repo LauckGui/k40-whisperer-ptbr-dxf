@@ -28,6 +28,14 @@ mantido internamente pelo `ezdxf` não é inteiramente observado pelo
 - progresso por fases e lotes;
 - publicação atômica: um documento incompleto nunca substitui o trabalho atual.
 
+Curvas analíticas são discretizadas por desvio geométrico máximo, e não por uma
+quantidade fixa de segmentos. Arcos calculam diretamente a maior corda permitida
+pela sagita; Béziers são subdivididas até que os controles estejam dentro da
+tolerância em relação à corda. A política é centralizada e compartilhável por
+preview, rotas e backends. Ela permanece serial: no arquivo real de referência,
+toda a adaptação legada custa cerca de 0,68 s, tornando threads ou processos mais
+caros que o trabalho que tentariam acelerar.
+
 O cancelamento não consegue interromper o interior de `ezdxf.readfile`; ele é
 aplicado assim que essa chamada retorna. A interface, porém, continua responsiva.
 
@@ -35,6 +43,5 @@ aplicado assim que essa chamada retorna. A interface, porém, continua responsiv
 
 - arquivo real grande fornecido por operador;
 - blocos repetidos e aninhados;
-- círculos, elipses e splines com diferentes tolerâncias;
-- comparação futura entre geometria achatada e curvas nativas;
+- elipses e splines complexas com diferentes tolerâncias;
 - arrays procedurais referenciando uma única geometria-base.
