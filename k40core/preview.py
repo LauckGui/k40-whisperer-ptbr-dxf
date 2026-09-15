@@ -1,6 +1,16 @@
 """Helpers for producing lightweight previews without changing job geometry."""
 
 
+def transparent_raster_preview(image, size):
+    """Return a black RGBA overlay where white/off pixels are transparent."""
+    from PIL import Image, ImageOps
+
+    grayscale = image.convert("L").resize(size, Image.LANCZOS)
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    overlay.putalpha(ImageOps.invert(grayscale))
+    return overlay
+
+
 def iter_preview_polylines(ecoords, transform, minimum_pixels=0.5):
     """Yield continuous, screen-space polylines with subpixel filtering.
 

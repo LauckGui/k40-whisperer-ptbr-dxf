@@ -1,6 +1,8 @@
 import unittest
 
-from k40core.preview import iter_preview_polylines
+from PIL import Image
+
+from k40core.preview import iter_preview_polylines, transparent_raster_preview
 
 
 class PreviewTests(unittest.TestCase):
@@ -44,6 +46,15 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(paths[0][:2], (0.0, 0.0))
         self.assertEqual(paths[0][-2:], (0.0, 0.0))
         self.assertGreater(len(paths[0]), 4)
+
+    def test_white_raster_background_is_transparent_in_preview(self):
+        source = Image.new("L", (2, 1), 255)
+        source.putpixel((1, 0), 0)
+
+        preview = transparent_raster_preview(source, (2, 1))
+
+        self.assertEqual(preview.getpixel((0, 0)), (0, 0, 0, 0))
+        self.assertEqual(preview.getpixel((1, 0)), (0, 0, 0, 255))
 
 
 if __name__ == "__main__":

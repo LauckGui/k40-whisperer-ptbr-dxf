@@ -34,7 +34,7 @@ from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
 from k40core.model import Bounds
-from k40core.preview import iter_preview_polylines
+from k40core.preview import iter_preview_polylines, transparent_raster_preview
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
 import inkex
@@ -1501,10 +1501,10 @@ class Application(Frame):
             
         Gcode_time =  self.GcodeData.gcode_time * Gcode_passes
 
-        self.Reng_time.set("Raster Engrave: %s" %(self.format_time(Reng_time)))  
-        self.Veng_time.set("Vector Engrave: %s" %(self.format_time(Veng_time)))
-        self.Vcut_time.set("    Vector Cut: %s" %(self.format_time(Vcut_time)))
-        self.Gcde_time.set("         Gcode: %s" %(self.format_time(Gcode_time)))
+        self.Reng_time.set("Gravação raster: %s" %(self.format_time(Reng_time)))
+        self.Veng_time.set("Gravação vetorial: %s" %(self.format_time(Veng_time)))
+        self.Vcut_time.set("Corte vetorial: %s" %(self.format_time(Vcut_time)))
+        self.Gcde_time.set("G-code: %s" %(self.format_time(Gcode_time)))
         
         ##########################################
         cszw = int(self.PreviewCanvas.cget("width"))
@@ -4745,6 +4745,7 @@ class Application(Frame):
         self.Master_Configure(dummy_event,1)
 
     def menu_Calc_Raster_Time(self,event=None):
+        self.include_Time.set(1)
         self.set_gui("disabled")
         self.stop[0]=False
         self.make_raster_coords()
@@ -4752,6 +4753,7 @@ class Application(Frame):
         self.refreshTime()
         self.set_gui("normal")
         self.menu_View_Refresh()
+        self.statusMessage.set("Tempo estimado calculado: %s" % self.Reng_time.get())
         
 
     def menu_Help_About(self):
@@ -5560,7 +5562,9 @@ class Application(Frame):
                             nw=int(self.SCALE*self.him)
                             
                         try:
-                            self.UI_image = ImageTk.PhotoImage(plot_im.resize((nw,nh), Image.LANCZOS))
+                            self.UI_image = ImageTk.PhotoImage(
+                                transparent_raster_preview(plot_im, (nw, nh))
+                            )
                         except:
                             debug_message("Imaging_Free Used.")
                             self.UI_image = self.Imaging_Free(plot_im.resize((nw,nh), Image.LANCZOS))
