@@ -135,11 +135,24 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
     def cell(point):
         return (math.floor(point.x / tolerance_mm), math.floor(point.y / tolerance_mm))
 
-    endpoint_index = defaultdict(list)
+    endpoint_index = defaultdict(set)
     for index, segment in enumerate(segments):
-        endpoint_index[cell(segment.start)].append((index, True))
-        endpoint_index[cell(segment.end)].append((index, False))
+        endpoint_index[cell(segment.start)].add((index, True))
+        endpoint_index[cell(segment.end)].add((index, False))
     unused = set(range(len(segments)))
+
+    def consume(index):
+        """Remove a segment and both stale endpoint-index entries."""
+        unused.remove(index)
+        segment = segments[index]
+        for endpoint, at_start in ((segment.start, True), (segment.end, False)):
+            bucket_cell = cell(endpoint)
+            bucket = endpoint_index.get(bucket_cell)
+            if bucket is None:
+                continue
+            bucket.discard((index, at_start))
+            if not bucket:
+                del endpoint_index[bucket_cell]
 
     def nearest(point):
         cx, cy = cell(point)
@@ -147,8 +160,6 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
         for ox in (-1, 0, 1):
             for oy in (-1, 0, 1):
                 for index, at_start in endpoint_index.get((cx+ox, cy+oy), ()):
-                    if index not in unused:
-                        continue
                     endpoint = segments[index].start if at_start else segments[index].end
                     distance = math.hypot(endpoint.x-point.x, endpoint.y-point.y)
                     if distance <= tolerance_mm:
@@ -161,7 +172,7 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
         while seed_index not in unused:
             seed_index += 1
         first_index = seed_index
-        unused.remove(first_index)
+        consume(first_index)
         first = segments[first_index]
         ordered = deque([first])
 
@@ -170,7 +181,7 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
             if match is None:
                 break
             _, index, at_start = match
-            unused.remove(index)
+            consume(index)
             segment = segments[index]
             ordered.append(segment if at_start else reverse_segment(segment))
 
@@ -179,7 +190,7 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
             if match is None:
                 break
             _, index, at_start = match
-            unused.remove(index)
+            consume(index)
             segment = segments[index]
             ordered.appendleft(reverse_segment(segment) if at_start else segment)
 

@@ -39,6 +39,20 @@ caros que o trabalho que tentariam acelerar.
 O cancelamento não consegue interromper o interior de `ezdxf.readfile`; ele é
 aplicado assim que essa chamada retorna. A interface, porém, continua responsiva.
 
+## Benchmark real
+
+No `teste_Chaveiro.dxf` ASCII de aproximadamente 207 MB, o índice topológico
+original mantinha em suas células as extremidades de segmentos já consumidos.
+Regiões densas voltavam a examinar esses candidatos obsoletos repetidamente. A
+remoção imediata das duas extremidades reduziu a composição de 30,45 s para
+21,10 s (cerca de 31%), preservando os mesmos 3 objetos, 3.498 caminhos e
+108.608 segmentos. O tempo total medido caiu de 138,5 s para 123,0 s.
+
+Uma segunda tentativa de evitar a lista temporária de candidatos não apresentou
+ganho mensurável e foi descartada. A leitura ASCII pelo `ezdxf`, com cerca de
+80 s nesse arquivo, permanece como o custo dominante fora do controle direto do
+modelo geométrico.
+
 ## Próximos benchmarks
 
 - arquivo real grande fornecido por operador;
