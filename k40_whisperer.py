@@ -34,6 +34,7 @@ from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
 from k40core.model import Bounds
+from k40core.preview import iter_preview_polylines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
 import inkex
@@ -5600,21 +5601,10 @@ class Application(Frame):
             if self.mirror.get() or self.rotate.get():
                 plot_coords = self.mirror_rotate_vector_coords(plot_coords)
 
-            preview_stride = self._preview_stride(plot_coords)
-            preview_index = 0
-            for line in plot_coords:
-                XY    = line
-                x1    = (XY[0]-xmin)
-                y1    = (XY[1]-ymax)
-                loop  = XY[2]
-                # check and see if we need to move to a new discontinuous start point
-                if (loop == loop_old):
-                    if preview_index % preview_stride == 0:
-                        self.Plot_Line(xold, yold, x1, y1, x_lft, y_top, XlineShift, YlineShift, self.PlotScale, "blue")
-                    preview_index += 1
-                loop_old = loop
-                xold=x1
-                yold=y1
+            self._plot_ecoord_paths(
+                plot_coords, xmin, ymax, x_lft, y_top,
+                XlineShift, YlineShift, "blue"
+            )
 
         ######################################
         ###       Plot Vcut Coords         ###
@@ -5626,21 +5616,10 @@ class Application(Frame):
             if self.mirror.get() or self.rotate.get():
                     plot_coords = self.mirror_rotate_vector_coords(plot_coords)
                 
-            preview_stride = self._preview_stride(plot_coords)
-            preview_index = 0
-            for line in plot_coords:
-                XY    = line
-                x1    = (XY[0]-xmin)
-                y1    = (XY[1]-ymax)
-                loop  = XY[2]
-                # check and see if we need to move to a new discontinuous start point
-                if (loop == loop_old):
-                    if preview_index % preview_stride == 0:
-                        self.Plot_Line(xold, yold, x1, y1, x_lft, y_top, XlineShift, YlineShift, self.PlotScale, "red")
-                    preview_index += 1
-                loop_old = loop
-                xold=x1
-                yold=y1
+            self._plot_ecoord_paths(
+                plot_coords, xmin, ymax, x_lft, y_top,
+                XlineShift, YlineShift, "red"
+            )
 
         ######################################
         ###       Plot Gcode Coords        ###
@@ -5715,9 +5694,32 @@ class Application(Frame):
             self.preview_line_buffer = None
             self._render_preview_lines(pending, render_generation)
 
-    def _preview_stride(self, ecoords, maximum_segments=4000):
-        """Limit only Canvas detail; source ECoords always remain complete."""
-        return max(1, int(math.ceil(max(0, len(ecoords) - 1) / float(maximum_segments))))
+    def _plot_ecoord_paths(self, ecoords, xmin, ymax, xleft, ytop,
+                           xshift, yshift, color, minimum_pixels=0.5):
+        """Render each continuous path as one Canvas polyline.
+
+        Points closer than a fraction of a screen pixel are omitted from the
+        preview only. Path endpoints and the complete machining ECoords remain
+        untouched.
+        """
+        def transform(x, y):
+            return (
+                xleft + ((x - xmin) + xshift) / self.PlotScale,
+                ytop - ((y - ymax) + yshift) / self.PlotScale,
+            )
+
+        for line_args in iter_preview_polylines(
+                ecoords, transform, minimum_pixels=minimum_pixels):
+            line_options = {
+                "fill": color, "capstyle": "round", "joinstyle": "round",
+                "width": 0, "tags": "LaserTag",
+            }
+            if self.preview_line_buffer is not None:
+                self.preview_line_buffer.append((line_args, line_options))
+            else:
+                self.segID.append(
+                    self.PreviewCanvas.create_line(*line_args, **line_options)
+                )
 
     def _render_preview_lines(self, pending, generation, start=0, batch_size=200):
         if generation != self.preview_render_generation:
