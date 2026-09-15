@@ -12,7 +12,8 @@ class RasterizationError(ValueError):
 
 
 def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = None,
-                    maximum_pixels: int = 100_000_000):
+                    maximum_pixels: int = 100_000_000,
+                    color_intensities=None):
     """Render all raster-engrave fills to a monochrome Pillow image.
 
     White means laser off and black means laser on, matching the legacy raster
@@ -23,7 +24,9 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
 
     visible_layers = {layer.id for layer in document.layers if layer.visible}
     fills = [item for item in document.fills
-             if item.operation.value == "raster_engrave" and item.layer_id in visible_layers]
+             if item.operation.value == "raster_engrave"
+             and item.layer_id in visible_layers
+             and item.metadata.get("fill_kind", "solid") == "solid"]
     if not fills:
         return None
     bounds = bounds or document.bounds
@@ -41,8 +44,24 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
         )
 
     output = Image.new("L", (width, height), 255)
-    union_region = Image.new("1", (width, height), 0)
-    union_draw = ImageDraw.Draw(union_region)
+    intensity_regions = {}
+
+    def resolved_intensity(fill):
+        if color_intensities and fill.color is not None:
+            key = fill.color.hex_rgb.lower()
+            if key in color_intensities:
+                value = float(color_intensities[key])
+                if not 0.0 <= value <= 1.0:
+                    raise RasterizationError("Intensidade mapeada deve estar entre 0 e 1.")
+                return value
+        return fill.intensity
+
+    def intensity_region(intensity):
+        region = intensity_regions.get(intensity)
+        if region is None:
+            region = Image.new("1", (width, height), 0)
+            intensity_regions[intensity] = region
+        return region
 
     def pixel(point, fill):
         transformed = fill.transform.apply(point)
@@ -52,7 +71,10 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
         )
 
     for fill in fills:
+        intensity = resolved_intensity(fill)
         if fill.fill_rule == "union":
+            union_region = intensity_region(intensity)
+            union_draw = ImageDraw.Draw(union_region)
             for path in fill.paths:
                 vertices = []
                 for segment in path.segments:
@@ -82,7 +104,12 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
                 region = ImageChops.logical_xor(region, path_mask)
             else:
                 region = ImageChops.lighter(region, path_mask)
-        output.paste(0, mask=region)
+        combined = intensity_region(intensity)
+        intensity_regions[intensity] = ImageChops.lighter(combined, region)
 
-    output.paste(0, mask=union_region)
+    for intensity, region in intensity_regions.items():
+        shade = int(round(255 * (1.0 - intensity)))
+        layer = Image.new("L", (width, height), 255)
+        layer.paste(shade, mask=region)
+        output = ImageChops.darker(output, layer)
     return output

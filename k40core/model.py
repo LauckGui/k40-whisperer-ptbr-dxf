@@ -309,6 +309,7 @@ class FillObject:
     layer_id: str
     operation: Operation = Operation.RASTER_ENGRAVE
     color: Optional[Color] = None
+    intensity: float = 1.0
     fill_rule: str = "even_odd"
     transform: AffineTransform = field(default_factory=AffineTransform)
     source: SourceReference = field(default_factory=SourceReference)
@@ -319,6 +320,8 @@ class FillObject:
             raise ValueError("Um preenchimento precisa ter ao menos um contorno.")
         if self.fill_rule not in {"even_odd", "nonzero", "union"}:
             raise ValueError("Regra de preenchimento inválida.")
+        if not 0.0 <= self.intensity <= 1.0:
+            raise ValueError("Intensidade do preenchimento deve estar entre 0 e 1.")
 
     @property
     def bounds(self) -> Optional[Bounds]:

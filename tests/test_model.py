@@ -4,6 +4,7 @@ from k40core.model import (
     AffineTransform,
     ArcSegment,
     Bounds,
+    Color,
     FillObject,
     ImportSource,
     JobDocument,
@@ -17,6 +18,7 @@ from k40core.model import (
     VectorObject,
     VectorPath,
 )
+from k40core.rasterizer import rasterize_fills
 
 
 class JobModelTests(unittest.TestCase):
@@ -90,6 +92,46 @@ class JobModelTests(unittest.TestCase):
 
         self.assertEqual(document.bounds, Bounds(2, 3, 12, 8))
         self.assertEqual(document.objects_for_operation(Operation.RASTER_ENGRAVE), [fill])
+
+    def test_fill_color_can_map_to_raster_intensity(self):
+        layer = Layer("layer:0", "Preenchimento")
+        path = VectorPath((
+            LineSegment(Point(0, 0), Point(10, 0)),
+            LineSegment(Point(10, 0), Point(10, 10)),
+            LineSegment(Point(10, 10), Point(0, 10)),
+            LineSegment(Point(0, 10), Point(0, 0)),
+        ), closed=True)
+        fill = FillObject(
+            "fill:green", (path,), layer.id, color=Color(0, 255, 0)
+        )
+        document = JobDocument(
+            ImportSource("fill.dxf", "dxf", "fixture"),
+            layers=[layer], fills=[fill],
+        )
+
+        image = rasterize_fills(
+            document, dpi=25.4, color_intensities={"#00ff00": 0.5}
+        )
+
+        self.assertEqual(image.getpixel((5, 5)), 128)
+
+    def test_pattern_fill_is_preserved_but_not_rendered_as_solid(self):
+        layer = Layer("layer:0", "Padrão")
+        path = VectorPath((
+            LineSegment(Point(0, 0), Point(1, 0)),
+            LineSegment(Point(1, 0), Point(0, 1)),
+            LineSegment(Point(0, 1), Point(0, 0)),
+        ), closed=True)
+        fill = FillObject(
+            "fill:pattern", (path,), layer.id,
+            metadata={"fill_kind": "pattern"},
+        )
+        document = JobDocument(
+            ImportSource("fill.dxf", "dxf", "fixture"),
+            layers=[layer], fills=[fill],
+        )
+
+        self.assertIsNone(rasterize_fills(document, dpi=100))
 
 
 if __name__ == "__main__":

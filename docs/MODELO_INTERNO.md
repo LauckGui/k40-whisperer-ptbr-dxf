@@ -52,6 +52,12 @@ trabalho é independente do número de passadas; o passo configurado seleciona
 as linhas de varredura posteriormente. Padrões e gradientes ainda precisam de
 backends próprios.
 
+Cada preenchimento também possui intensidade normalizada de 0 a 1. O
+rasterizador aceita um mapa opcional de cor para intensidade — por exemplo,
+verde para 50% — sem vincular ainda essa política ao importador. O backend Nano
+pode representar níveis por densidade/dithering; controladoras futuras com PWM
+podem consumir a mesma intensidade como modulação de potência.
+
 ## Topologia e rotas
 
 O adaptador legado reconstrói caminhos a partir de linhas explodidas usando um

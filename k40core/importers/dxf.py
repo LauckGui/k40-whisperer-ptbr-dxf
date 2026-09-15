@@ -328,6 +328,7 @@ def import_dxf_document(
                     skipped[entity_type] += 1
                     continue
                 color = _effective_color(entity, document, context, layer_name)
+                is_solid_fill = bool(getattr(entity.dxf, "solid_fill", True))
                 object_id = f"dxf:{handle}:{index}" if handle is not None else f"dxf:index:{index}"
                 result.fills.append(FillObject(
                     id=object_id,
@@ -338,11 +339,19 @@ def import_dxf_document(
                     source=reference,
                     metadata={
                         "source_entity": entity_type,
-                        "solid_fill": bool(getattr(entity.dxf, "solid_fill", True)),
+                        "solid_fill": is_solid_fill,
+                        "fill_kind": "solid" if is_solid_fill else "pattern",
                         "pattern_name": getattr(entity.dxf, "pattern_name", None),
                         "flattening_tolerance_mm": tolerance_mm,
                     },
                 ))
+                if entity_type == "HATCH" and not is_solid_fill:
+                    result.issues.append(ImportIssue(
+                        code="dxf.hatch_pattern_deferred",
+                        message="Padrão HATCH preservado, mas ainda não rasterizado.",
+                        severity=IssueSeverity.WARNING,
+                        source=reference,
+                    ))
                 converted += 1
                 if index % progress_batch == 0:
                     report_progress(
