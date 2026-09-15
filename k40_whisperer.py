@@ -5665,7 +5665,6 @@ class Application(Frame):
         """Draw machine-unit rulers and the X=0/Y=0 reference axes."""
         width = float(self.LaserXsize.get())
         height = float(self.LaserYsize.get())
-        unit = self.units.get()
         canvas_width = int(self.PreviewCanvas.cget("width"))
         canvas_height = int(self.PreviewCanvas.cget("height"))
         color = "#536170"
@@ -5706,22 +5705,18 @@ class Application(Frame):
                     fill=color, tags="Ruler"
                 )
                 self.PreviewCanvas.create_text(
-                    ruler_left+2, y-2, text=("%g" % value), anchor="sw",
+                    visible_left-4, y-2, text=("%g" % value), anchor="se",
                     fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
                 )
 
         x_zero = x_rgt if self.HomeUR.get() else x_lft
         self.PreviewCanvas.create_line(
-            x_zero, ruler_top, x_zero, y_bot, fill="#1480a8", width=1,
-            dash=(4, 3), tags="Ruler"
+            x_zero, ruler_top, x_zero, y_bot, fill="#1480a8", width=2,
+            tags="Ruler"
         )
         self.PreviewCanvas.create_line(
-            ruler_left, y_top, x_rgt, y_top, fill="#1480a8", width=1,
-            dash=(4, 3), tags="Ruler"
-        )
-        self.PreviewCanvas.create_text(
-            ruler_left+3, ruler_top+3, text=unit, anchor="nw",
-            fill="#1480a8", font=("TkDefaultFont", 7, "bold"), tags="Ruler"
+            ruler_left, y_top, x_rgt, y_top, fill="#1480a8", width=2,
+            tags="Ruler"
         )
 
     def Plot_Data(self, incremental=False):
