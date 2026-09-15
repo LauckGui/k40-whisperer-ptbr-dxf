@@ -38,6 +38,7 @@ from k40core.arrays import array_steps, instance_array_bounds, maximum_array_cou
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
 from k40core.preview import iter_preview_polylines, transparent_raster_preview
+from k40core.rasterizer import rasterize_fills
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
 import inkex
@@ -752,8 +753,7 @@ class Application(Frame):
         self.Open_Button       = Button(self.master,text="Abrir Vetor", command=self.menu_File_Open_Design)
         self.Reload_Button     = Button(self.master,text="Recarregar Vetor", command=self.menu_Reload_Design)
         self.Array_Button      = Button(self.master, text="Múltiplas Cópias",
-                                        command=self.MULTIPLE_COPIES_Window,
-                                        relief=FLAT, bd=0)
+                                        command=self.MULTIPLE_COPIES_Window)
         
         self.Home_Button       = Button(self.master,text="Origem",          command=self.Home)
         self.UnLock_Button     = Button(self.master,text="Liberar eixos",   command=self.Unlock)
@@ -833,6 +833,7 @@ class Application(Frame):
         self.Initialize_Button.configure(bd=1, relief=RAISED, highlightthickness=0)
         self.Open_Button.configure(image=self.ui_icons["folder"], compound=LEFT)
         self.Reload_Button.configure(image=self.ui_icons["reload"], compound=LEFT)
+        self.Array_Button.configure(bd=1, relief=RAISED, highlightthickness=0)
         self.Home_Button.configure(image=self.ui_icons["home"], compound=LEFT)
         self.UnLock_Button.configure(image=self.ui_icons["unlock"], compound=LEFT)
         self.GoTo_Button.configure(image=self.ui_icons["target_compact"], compound=LEFT)
@@ -6031,13 +6032,15 @@ class Application(Frame):
     def MULTIPLE_COPIES_Window(self):
         if self.GUI_Disabled:
             return
-        if self.job_document is None or not self.job_document.vectors:
+        if self.job_document is None or not (
+                self.job_document.vectors or self.job_document.fills or self.job_document.rasters):
             self.statusbar.configure(bg='yellow')
             self.statusMessage.set("Importe um DXF vetorial antes de criar múltiplas cópias.")
             return
 
         document = self.job_document
-        base_bounds = Bounds.union(item.bounds for item in document.vectors)
+        base_objects = [*document.vectors, *document.fills, *document.rasters]
+        base_bounds = Bounds.union(item.bounds for item in base_objects)
         if base_bounds is None or base_bounds.width <= 0.0 or base_bounds.height <= 0.0:
             self.statusMessage.set("O desenho atual não possui dimensões válidas para um array.")
             return
@@ -6045,8 +6048,8 @@ class Application(Frame):
         existing = document.arrays[0] if document.arrays else None
         copies = Toplevel(self.master)
         copies.title("Múltiplas Cópias")
-        copies.geometry("640x590")
-        copies.minsize(640, 590)
+        copies.geometry("700x620")
+        copies.minsize(700, 620)
         copies.resizable(0, 0)
         copies.transient(self.master)
         copies.grab_set()
@@ -6065,18 +6068,18 @@ class Application(Frame):
         summary = StringVar()
         warning = StringVar()
 
-        container = Frame(copies, padx=16, pady=14)
+        container = Frame(copies, padx=12, pady=10)
         container.pack(fill=BOTH, expand=1)
 
-        mode_frame = LabelFrame(container, text="Modo de distribuição", padx=10, pady=7)
-        mode_frame.pack(fill=X, pady=(0, 8))
+        mode_frame = LabelFrame(container, text="Modo de distribuição", padx=8, pady=4)
+        mode_frame.pack(fill=X, pady=(0, 5))
         Radiobutton(mode_frame, text="Grade", variable=mode, value="grid").pack(
             side=LEFT, padx=(4, 30))
         Radiobutton(mode_frame, text="Zig-zag compacto", variable=mode,
                     value="staggered").pack(side=LEFT)
 
-        values = LabelFrame(container, text="Distribuição", padx=10, pady=8)
-        values.pack(fill=X, pady=(0, 8))
+        values = LabelFrame(container, text="Distribuição", padx=8, pady=5)
+        values.pack(fill=X, pady=(0, 5))
         labels = (
             ("Colunas", columns), ("Linhas", rows),
             ("Espaçamento entre peças (mm)", spacing),
@@ -6085,14 +6088,23 @@ class Application(Frame):
         )
         entries = []
         for index, (text_value, variable) in enumerate(labels):
+            row = index // 3
+            column = (index % 3)*2
             Label(values, text=text_value, anchor=W).grid(
-                row=index, column=0, sticky="w", padx=4, pady=3)
-            entry = Entry(values, textvariable=variable, justify=RIGHT, width=14)
-            entry.grid(row=index, column=1, sticky="e", padx=4, pady=3)
+                row=row, column=column, sticky="w", padx=(4, 3), pady=3)
+            if index < 2:
+                entry = Spinbox(
+                    values, textvariable=variable, from_=1, to=10000,
+                    increment=1, justify=RIGHT, width=7,
+                )
+            else:
+                entry = Entry(values, textvariable=variable, justify=RIGHT, width=10)
+            entry.grid(row=row, column=column+1, sticky="e", padx=(0, 10), pady=3)
             entries.append(entry)
-        values.columnconfigure(0, weight=1)
+        for column in (0, 2, 4):
+            values.columnconfigure(column, weight=1)
 
-        preview = Canvas(container, width=580, height=210, bg="#d4d4d4",
+        preview = Canvas(container, width=650, height=345, bg="#c8c8c8",
                          highlightthickness=1, highlightbackground="#9aa0a6")
         preview.pack(fill=X, pady=(0, 7))
         Label(container, textvariable=summary, anchor=W).pack(fill=X)
@@ -6110,7 +6122,7 @@ class Application(Frame):
             if column_count*row_count > 10000:
                 raise ValueError("O limite desta versão é de 10.000 cópias.")
             return InstanceArray(
-                "array:main", tuple(item.id for item in document.vectors),
+                "array:main", tuple(item.id for item in base_objects),
                 columns=column_count, rows=row_count, spacing_mm=gap,
                 mode=mode.get(), stagger_x_mm=stagger,
                 row_adjust_y_mm=adjust_y,
@@ -6126,18 +6138,29 @@ class Application(Frame):
                 from k40core.arrays import instance_offsets
                 offsets = list(instance_offsets(array, base_bounds))
                 result_bounds = instance_array_bounds(
-                    array, {item.id: item.bounds for item in document.vectors}
+                    array, {item.id: item.bounds for item in base_objects}
                 )
                 canvas_width = int(preview.cget("width"))
                 canvas_height = int(preview.cget("height"))
-                scale = max(result_bounds.width/max(1, canvas_width-20),
-                            result_bounds.height/max(1, canvas_height-20), 1e-9)
+                machine_factor = 1.0 if self.units.get() == "mm" else 25.4
+                machine_width = float(self.LaserXsize.get())*machine_factor
+                machine_height = float(self.LaserYsize.get())*machine_factor
+                scale = max(machine_width/max(1, canvas_width-24),
+                            machine_height/max(1, canvas_height-24), 1e-9)
+                area_width = machine_width/scale
+                area_height = machine_height/scale
+                area_left = (canvas_width-area_width)/2.0
+                area_top = (canvas_height-area_height)/2.0
+                preview.create_rectangle(
+                    area_left, area_top, area_left+area_width, area_top+area_height,
+                    fill="#ededed", outline="#59636e", width=2,
+                )
                 shown = offsets[:500]
                 for offset_x, offset_y in shown:
-                    x0 = 10+(base_bounds.min_x+offset_x-result_bounds.min_x)/scale
-                    y0 = 10+(base_bounds.min_y+offset_y-result_bounds.min_y)/scale
-                    x1 = 10+(base_bounds.max_x+offset_x-result_bounds.min_x)/scale
-                    y1 = 10+(base_bounds.max_y+offset_y-result_bounds.min_y)/scale
+                    x0 = area_left+(base_bounds.min_x+offset_x-result_bounds.min_x)/scale
+                    y0 = area_top+(base_bounds.min_y+offset_y-result_bounds.min_y)/scale
+                    x1 = area_left+(base_bounds.max_x+offset_x-result_bounds.min_x)/scale
+                    y1 = area_top+(base_bounds.max_y+offset_y-result_bounds.min_y)/scale
                     preview.create_rectangle(x0, y0, x1, y1, outline="#b42318")
                 total = array.columns*array.rows
                 step_x, step_y = array_steps(array, base_bounds)
@@ -6145,9 +6168,6 @@ class Application(Frame):
                     "%d cópias | passo X %.2f mm | passo Y %.2f mm | área %.2f × %.2f mm" %
                     (total, step_x, step_y, result_bounds.width, result_bounds.height)
                 )
-                machine_factor = 1.0 if self.units.get() == "mm" else 25.4
-                machine_width = float(self.LaserXsize.get())*machine_factor
-                machine_height = float(self.LaserYsize.get())*machine_factor
                 messages = []
                 if result_bounds.width > machine_width or result_bounds.height > machine_height:
                     messages.append("O array ultrapassa a área útil configurada.")
@@ -6237,7 +6257,11 @@ class Application(Frame):
                 cut_data, engrave_data = ECoord(), ECoord()
                 cut_data.make_ecoords(cut_lines, scale=1.0)
                 engrave_data.make_ecoords(engrave_lines, scale=1.0)
-                self.array_build_queue.put(("complete", (cut_data, engrave_data)))
+                raster_image = (rasterize_fills(document, self.input_dpi)
+                                if document.fills else None)
+                self.array_build_queue.put(
+                    ("complete", (cut_data, engrave_data, raster_image))
+                )
             except Exception as exc:
                 self.array_build_queue.put(("error", exc))
 
@@ -6268,7 +6292,12 @@ class Application(Frame):
             self.statusMessage.set("Falha ao criar múltiplas cópias: %s" % payload)
             return
 
-        self.VcutData, self.VengData = payload
+        self.VcutData, self.VengData, raster_image = payload
+        if raster_image is not None:
+            self.RengData.set_image(raster_image)
+            self.wim, self.him = raster_image.size
+            self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
+            self.SCALE = 0
         self.array_previous_arrays = None
         bounds = self.job_document.bounds
         if bounds is not None:

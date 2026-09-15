@@ -3,9 +3,10 @@ import unittest
 from k40core.arrays import instance_offsets, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import (
-    Bounds, ImportSource, InstanceArray, JobDocument, Layer, LineSegment,
+    Bounds, FillObject, ImportSource, InstanceArray, JobDocument, Layer, LineSegment,
     Operation, Point, VectorObject, VectorPath,
 )
+from k40core.rasterizer import rasterize_fills
 
 
 class InstanceArrayTests(unittest.TestCase):
@@ -74,6 +75,27 @@ class InstanceArrayTests(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertAlmostEqual(lines[1][0], 15.0/25.4)
         self.assertEqual(document.bounds, Bounds(0, 0, 25, 0))
+
+    def test_array_repeats_solid_raster_fills(self):
+        layer = Layer("layer", "Raster")
+        path = VectorPath((
+            LineSegment(Point(0, 0), Point(2, 0)),
+            LineSegment(Point(2, 0), Point(2, 2)),
+            LineSegment(Point(2, 2), Point(0, 2)),
+            LineSegment(Point(0, 2), Point(0, 0)),
+        ), closed=True)
+        fill = FillObject("solid", (path,), layer.id)
+        document = JobDocument(
+            ImportSource("fixture", "test", "test"), [layer], fills=[fill],
+            arrays=[InstanceArray("array:1", (fill.id,), columns=2, rows=1,
+                                  spacing_mm=1.0)],
+        )
+
+        image = rasterize_fills(document, dpi=25.4)
+
+        self.assertEqual(image.size, (5, 2))
+        self.assertEqual(image.getpixel((0, 0)), 0)
+        self.assertEqual(image.getpixel((4, 0)), 0)
 
 
 if __name__ == "__main__":

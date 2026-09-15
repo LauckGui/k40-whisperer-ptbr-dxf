@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+from .arrays import instance_offsets, referenced_bounds
 from .model import Bounds, FillObject, JobDocument, LineSegment
 
 
@@ -45,6 +46,15 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
 
     output = Image.new("L", (width, height), 255)
     intensity_regions = {}
+    object_bounds = {
+        item.id: item.bounds
+        for item in [*document.vectors, *document.rasters, *document.fills]
+    }
+    offsets_by_object = {}
+    for array in document.arrays:
+        offsets = tuple(instance_offsets(array, referenced_bounds(array, object_bounds)))
+        for object_id in array.object_ids:
+            offsets_by_object[object_id] = offsets
 
     def resolved_intensity(fill):
         if color_intensities and fill.color is not None:
@@ -63,49 +73,52 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
             intensity_regions[intensity] = region
         return region
 
-    def pixel(point, fill):
+    def pixel(point, fill, offset_x=0.0, offset_y=0.0):
         transformed = fill.transform.apply(point)
         return (
-            (transformed.x - bounds.min_x) / 25.4 * dpi,
-            (bounds.max_y - transformed.y) / 25.4 * dpi,
+            (transformed.x + offset_x - bounds.min_x) / 25.4 * dpi,
+            (bounds.max_y - transformed.y - offset_y) / 25.4 * dpi,
         )
 
     for fill in fills:
         intensity = resolved_intensity(fill)
+        offsets = offsets_by_object.get(fill.id, ((0.0, 0.0),))
         if fill.fill_rule == "union":
             union_region = intensity_region(intensity)
             union_draw = ImageDraw.Draw(union_region)
+            for offset_x, offset_y in offsets:
+                for path in fill.paths:
+                    vertices = []
+                    for segment in path.segments:
+                        if not isinstance(segment, LineSegment):
+                            raise RasterizationError("Preenchimento precisa estar achatado antes da rasterização.")
+                        if not vertices:
+                            vertices.append(pixel(segment.start, fill, offset_x, offset_y))
+                        vertices.append(pixel(segment.end, fill, offset_x, offset_y))
+                    if len(vertices) >= 3:
+                        union_draw.polygon(vertices, fill=1)
+            continue
+
+        for offset_x, offset_y in offsets:
+            region = Image.new("1", (width, height), 0)
             for path in fill.paths:
                 vertices = []
                 for segment in path.segments:
                     if not isinstance(segment, LineSegment):
                         raise RasterizationError("Preenchimento precisa estar achatado antes da rasterização.")
                     if not vertices:
-                        vertices.append(pixel(segment.start, fill))
-                    vertices.append(pixel(segment.end, fill))
-                if len(vertices) >= 3:
-                    union_draw.polygon(vertices, fill=1)
-            continue
-
-        region = Image.new("1", (width, height), 0)
-        for path in fill.paths:
-            vertices = []
-            for segment in path.segments:
-                if not isinstance(segment, LineSegment):
-                    raise RasterizationError("Preenchimento precisa estar achatado antes da rasterização.")
-                if not vertices:
-                    vertices.append(pixel(segment.start, fill))
-                vertices.append(pixel(segment.end, fill))
-            if len(vertices) < 3:
-                continue
-            path_mask = Image.new("1", (width, height), 0)
-            ImageDraw.Draw(path_mask).polygon(vertices, fill=1)
-            if fill.fill_rule == "even_odd":
-                region = ImageChops.logical_xor(region, path_mask)
-            else:
-                region = ImageChops.lighter(region, path_mask)
-        combined = intensity_region(intensity)
-        intensity_regions[intensity] = ImageChops.lighter(combined, region)
+                        vertices.append(pixel(segment.start, fill, offset_x, offset_y))
+                    vertices.append(pixel(segment.end, fill, offset_x, offset_y))
+                if len(vertices) < 3:
+                    continue
+                path_mask = Image.new("1", (width, height), 0)
+                ImageDraw.Draw(path_mask).polygon(vertices, fill=1)
+                if fill.fill_rule == "even_odd":
+                    region = ImageChops.logical_xor(region, path_mask)
+                else:
+                    region = ImageChops.lighter(region, path_mask)
+            combined = intensity_region(intensity)
+            intensity_regions[intensity] = ImageChops.lighter(combined, region)
 
     for intensity, region in intensity_regions.items():
         shade = int(round(255 * (1.0 - intensity)))

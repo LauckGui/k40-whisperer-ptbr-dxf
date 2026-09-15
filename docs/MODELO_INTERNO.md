@@ -154,9 +154,11 @@ o avanço vertical aceita ajuste Y. O objeto original é sempre a primeira cópi
 
 Limites e preenchimento da área útil são calculados diretamente pelas
 transformações das instâncias. A janela **Múltiplas Cópias** usa envelopes leves
-para atualizar o encaixe sem clonar os vetores. A expansão em coordenadas ocorre
-somente na fronteira legada, em uma thread de trabalho, enquanto o documento
-canônico continua contendo uma única geometria-base.
+para atualizar o encaixe sem clonar os vetores e desenha a área de corte na
+proporção configurada da máquina. A expansão em coordenadas ocorre somente na
+fronteira legada, em uma thread de trabalho, enquanto o documento canônico
+continua contendo uma única geometria-base. Preenchimentos sólidos pertencem ao
+mesmo array e são rasterizados novamente com os deslocamentos das instâncias.
 
 ## Configuração persistente
 
