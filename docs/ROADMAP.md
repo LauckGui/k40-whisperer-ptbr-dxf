@@ -1,147 +1,160 @@
-# Roadmap proposto
+# Roadmap da primeira versão funcional
 
-Este roadmap separa as ideias solicitadas das sugestões técnicas. Prioridade não significa início automático: cada marco deve ser validado com critérios de aceite e testes.
+## Objetivo
 
-## Princípios
+Entregar o melhor fluxo possível para preparar e executar trabalhos reais na
+K40, com baixo consumo de tempo, memória e processamento. A V1 fica concentrada
+em DXF, raster nativo, transformações essenciais e arrays procedurais.
 
-- Segurança de movimento e laser acima de conveniência.
-- Compatibilidade com trabalhos existentes enquanto houver migração.
-- Modelo interno independente do formato importado e da controladora.
-- Toda operação deve poder ser simulada sem hardware.
-- Mudanças pequenas, versionadas e reversíveis.
+Funcionalidades que não reduzam trabalho recorrente do operador ou não sejam
+necessárias para esses quatro pilares ficam fora do caminho crítico.
 
-## Fase 0 — Baseline reproduzível (P0)
+## Princípios de decisão
 
-**Objetivo:** saber exatamente o que é executado e impedir regressões.
+- Priorizar arquivos e operações usados na prática.
+- Medir antes de otimizar e manter benchmarks reproduzíveis.
+- Evitar cópias de geometria e processamento antecipado desnecessário.
+- Preservar objetos procedurais e curvas analíticas pelo maior tempo possível.
+- Executar tarefas pesadas fora da thread da interface e publicar em lotes.
+- Não adicionar dependências externas quando houver implementação interna
+  simples, testável e distribuível.
+- Cada marco precisa de testes automatizados e validação com arquivos reais.
 
-- Criar fork/clone com histórico e registrar `upstream` após escolha da conta GitHub.
-- [Concluído] Instalar a fonte oficial 0.71; a base 0.64 foi removida posteriormente por solicitação do responsável.
-- Comparar formalmente 0.64 com 0.71 e registrar as mudanças relevantes para o desenvolvimento.
-- [Concluído] Ambiente Python por computador, dependências fixadas e preparação automatizada no Windows.
-- Modernizar o build Windows e produzir instruções PT-BR de desenvolvimento.
-- Criar smoke test de inicialização e fixtures pequenas de SVG, DXF, raster e G-code.
-- Capturar saídas de referência de geometria e EGV.
-- Adicionar modo dry-run e regra de testes que não acesse hardware.
+## Ordem da V1
 
-**Dificuldade:** M.  
-**Critério de saída:** instalação limpa reproduzível, testes executáveis e comparação documentada 0.64 → 0.71.
+### 1. Concluir as otimizações de importação
 
-## Fase 1 — Estrutura interna e idioma (P0)
+**Objetivo:** abrir DXFs grandes com feedback contínuo, uso controlado de memória
+e sem congelar a interface.
 
-**Objetivo:** permitir evolução incremental sem reescrever tudo.
+Já concluído:
 
-- Extrair serviços de configuração, documento/trabalho, transformações, importação e controladora.
-- Definir um `JobModel` com objetos, camadas, operação, cor, geometria e imagem.
-- Introduzir interfaces `Importer` e `MachineBackend`.
-- Migrar configurações para formato versionado (JSON ou TOML), com importação do TXT legado.
-- [Em andamento] Interface PT-BR inicial entregue; falta extrair as strings para catálogo i18n e oferecer alternância PT-BR/inglês.
-- Criar tratamento central de erros e logging útil para suporte.
+- ambiente Python isolado por computador e dependências fixadas;
+- importação DXF em thread de trabalho, cancelamento e barra de progresso;
+- publicação atômica do trabalho e deslocamento por referência;
+- correções de OCS/WCS, projeção, layers, cores e entidades preenchidas;
+- composição e simplificação de linhas explodidas;
+- instrumentação por fase;
+- uma única decomposição das entidades e preservação de curvas analíticas;
+- discretização de curvas somente na fronteira legada.
 
-**Dificuldade:** G.  
-**Critério de saída:** interface abre em PT-BR/inglês; configuração antiga migra; importadores e máquina atual passam pelos novos contratos sem mudar o resultado.
+Pendente para encerrar o marco:
 
-## Fase 2 — Ganhos rápidos de fluxo (P1)
+1. Otimizar a leitura do arquivo e verificar alternativas seguras do `ezdxf`.
+2. Reduzir o custo da composição topológica em desenhos inteiramente explodidos.
+3. Medir tempo e pico de memória com corpus pequeno, médio e grande.
+4. Garantir atualização incremental do preview sem pico na thread principal.
+5. Criar testes de regressão para DXFs grandes, curvas, textos e contornos
+   explodidos.
+6. Definir um formato de projeto salvo manualmente para reabrir o documento já
+   processado, sem cache automático.
 
-**Objetivo:** reduzir preparação fora do programa.
+**Critério de conclusão:** os arquivos reais de referência abrem sem congelamento,
+com progresso e cancelamento funcionais, métricas registradas e sem alteração de
+posição, escala ou geometria.
 
-- Painel de propriedades com largura, altura, escala uniforme/não uniforme.
-- Espelhamento horizontal/vertical e rotações 90°/180°/270°.
-- Array retangular com linhas, colunas e espaçamento.
-- Desfazer/refazer para transformações.
-- Preview com seleção, limites da mesa, origem e alerta de extrapolação.
-- Biblioteca de predefinições por material/processo, com nome, velocidade, passes e notas.
-- Atribuição explícita de operação e cor por objeto/camada.
+### 2. Implementar arrays procedurais inteligentes
 
-**Dificuldade:** G no conjunto; M por entrega.  
-**Critério de saída:** um trabalho pode ser importado, dimensionado, replicado, classificado e preparado sem abrir editor externo para essas tarefas.
+**Objetivo:** replicar peças sem duplicar seus vetores e sem exigir DXFs enormes.
 
-## Fase 3 — Importação moderna e raster nativo (P1)
+Esta etapa vem antes da edição completa de vetores porque afeta diretamente
+memória, preview, limites da mesa, estimativa de tempo e cálculo de rotas.
 
-**Objetivo:** aumentar compatibilidade e eliminar dependências desnecessárias.
+Escopo:
 
-Ordem recomendada:
+1. Criar objeto de instância que referencie uma geometria-base.
+2. Implementar array retangular por quantidade e espaçamento ou distância total.
+3. Manter o array editável, sem explodir clones em vetores.
+4. Calcular limites e preview a partir de transformações das instâncias.
+5. Reutilizar resultados geométricos e preparar otimização de rota por peça.
+6. Permitir transformar, habilitar e remover o array sem alterar a base.
 
-1. DXF via `ezdxf`, com relatório de entidades suportadas/ignoradas e fallback temporário.
-2. PNG, JPEG, BMP e TIFF diretos via Pillow, com DPI/tamanho físico explícitos, após a consolidação do DXF.
-3. SVG vetorial nativo mais previsível e rasterização via backend empacotável.
-4. PDF e AI compatível com PDF, com mensagens claras para variantes não suportadas.
-5. 3DM com seleção de curvas/camadas e projeção 2D documentada.
-6. DWG por conversor/adaptador opcional, após decisão de licença e distribuição.
+**Critério de conclusão:** centenas de cópias usam uma única geometria-base,
+continuam editáveis e não provocam crescimento proporcional do modelo canônico.
 
-**Dificuldade:** G–XG.  
-**Critério de saída:** matriz de compatibilidade por formato, corpus de arquivos reais e nenhum erro silencioso de escala/unidade.
+### 3. Concluir raster nativo sem Inkscape
 
-## Fase 4 — Backend GRBL (P1 estratégico)
+**Objetivo:** importar e preparar gravações raster sem ferramentas externas.
 
-**Objetivo:** usar o mesmo aplicativo com lasers K40/Nano e GRBL.
+Já concluído:
 
-- Implementar `MachineBackend` primeiro para a Nano sem alterar comportamento.
-- Criar gerador G-code a partir do `JobModel`.
-- Criar transporte serial GRBL com descoberta de porta, handshake e leitura de estado.
-- Implementar buffer/streaming, pausa, retomada, cancelamento, soft reset e recuperação.
-- Mapear perfis de máquina: área, origem, limites, homing, aceleração e comandos de laser.
-- Suportar GRBL 1.1 e validar diferenças relevantes de firmware/controladora.
-- Criar simulador de protocolo e testes de longa duração antes de bancada.
-- Só depois habilitar testes físicos graduais.
+- representação canônica de preenchimentos e imagens;
+- conversão inicial de `HATCH`, `SOLID` e `TRACE`;
+- rasterização interna de preenchimentos, furos e transparência do fundo;
+- intensidade normalizada preparada no modelo.
 
-**Dificuldade:** XG.  
-**Critério de saída:** o mesmo trabalho produz preview equivalente e executa com segurança em perfis Nano e GRBL homologados.
+Pendente:
 
-## Fase 5 — UX e operação (P2 contínuo)
+1. Consolidar preenchimentos DXF sólidos e seus casos de contorno.
+2. Importar diretamente PNG, JPEG, BMP e TIFF com DPI/tamanho físico explícito.
+3. Implementar grayscale real de 0 a 100%, mantendo a intensidade independente
+   da cor de processo.
+4. Definir conversão para máquinas sem PWM: dithering ou densidade de linhas.
+5. Manter caminho preparado para PWM em controladoras compatíveis, sem torná-lo
+   requisito da K40 atual.
+6. Integrar espaçamento/DPI, velocidade, passadas, preview e estimativa de tempo.
+7. Validar memória e processamento com imagens e hatches grandes.
 
-- Fluxo guiado: Importar → Preparar → Simular → Executar.
-- Fila/histórico local de trabalhos e reexecução controlada.
-- Diagnóstico de conexão e exportação de pacote de suporte.
-- Perfis de máquina e materiais com backup/exportação.
-- Atalhos, acessibilidade, temas e layout responsivo.
-- Documentação do operador, manutenção e solução de problemas em PT-BR.
+**Critério de conclusão:** preenchimentos e imagens em grayscale podem ser
+importados, visualizados, configurados e enviados sem Inkscape, com resultado e
+dimensões previsíveis.
 
-## Ideias solicitadas
+### 4. Edição simples de vetores no painel principal
 
-- Tradução PT-BR.
-- Espelhamento, escala e arrays.
-- DXF mais robusto.
-- Raster nativo sem dependência do Inkscape.
-- Predefinições de velocidades.
-- Troca de cores/atribuição de linhas.
-- Melhorias visuais e de fluxo.
-- AI, 3DM, DWG e outros formatos.
-- Suporte futuro a GRBL para padronização entre lasers.
+**Objetivo:** preparar o trabalho sem retornar ao CAD para ajustes básicos.
 
-## Sugestões para aprovação
+Escopo:
 
-Estas sugestões não foram tratadas como requisitos aprovados:
+1. Seleção do trabalho, objeto ou array no preview.
+2. Largura, altura e escala uniforme ou independente.
+3. Rotação livre e atalhos de 90°, 180° e 270°.
+4. Espelhamento horizontal e vertical.
+5. Ponto de referência previsível para cada transformação.
+6. Campos no painel principal com atualização imediata de limites e preview.
+7. Transformações por referência, sem reescrever todos os vetores.
+8. Desfazer e refazer apenas para as operações de edição da V1.
 
-1. **Atualizar primeiro para 0.71**, preservando o histórico e isolando a atualização das novas funções.
-2. **Criar um modelo de trabalho independente** para evitar que cada formato e controladora implemente regras duplicadas.
-3. **Adicionar simulação/dry-run obrigatória** e testes sem hardware desde a primeira fase.
-4. **Separar operação de cor**: vermelho/azul continuam importáveis, mas deixam de ser a única forma de decidir corte/gravação.
-5. **Priorizar raster direto e DXF antes de AI/3DM/DWG**, pois atendem mais trabalhos com menor risco técnico/licenciamento.
-6. **Tratar DWG como integração opcional**, condicionada à escolha de biblioteca/conversor e licença.
-7. **Começar GRBL somente após a interface de controladoras**, usando simulador antes de qualquer máquina real.
-8. **Incluir limites e origem no preview**, bloqueando execução fora da área útil por padrão.
-9. **Criar presets completos de processo**, não apenas velocidade: passes, modo, intervalo/DPI e notas, deixando potência vinculada à capacidade da máquina.
-10. **Manter migração compatível das configurações**, para não perder ajustes atuais de operação.
+**Critério de conclusão:** escala, rotação e espelhamento são aplicados de forma
+não destrutiva e responsiva, inclusive em arrays, sem modificar a geometria-base.
 
-## Primeira sequência de implementação recomendada
+## Dependências entre os marcos
 
-1. Recuperar histórico/fork sobre a base 0.71 já instalada.
-2. Montar ambiente Python e smoke tests.
-3. Testes de caracterização para importação, transformações e EGV.
-4. Extrair catálogo de textos e configuração versionada.
-5. Entregar PT-BR e presets como primeira melhoria visível.
-6. Consolidar transformações e implementar array com preview/limites.
-7. Migrar DXF para adaptador robusto.
-8. Implementar raster direto após a consolidação do DXF.
-9. Preparar e implementar GRBL.
-10. Avaliar AI/3DM/DWG com arquivos reais dos usuários.
+```text
+Importação otimizada
+        |
+        v
+Modelo de instâncias/arrays
+       / \
+      v   v
+Raster   Edição por transformações
+   \       /
+    v     v
+ Fluxo funcional da V1
+```
 
-## Decisões pendentes
+Raster pode avançar em paralelo conceitualmente, mas a sequência principal deve
+estabilizar primeiro importação e instâncias. A edição usa o mesmo sistema de
+transformações criado para arrays.
 
-- Conta ou organização GitHub que receberá o fork.
-- Sistemas operacionais prioritários (presumido: Windows primeiro).
-- Modelos exatos das placas Nano e GRBL em uso.
-- Dimensões, origem, homing e limites de cada laser.
-- Formatos e arquivos reais mais frequentes na operação.
-- Se os presets serão globais, por máquina ou compartilhados em rede.
-- Política de potência: manual no painel da K40 ou controlada por firmware nos equipamentos GRBL.
+## Fora do escopo da V1
+
+- suporte novo a SVG, PDF, AI, 3DM e DWG;
+- backend GRBL;
+- preservação procedural de blocos DXF;
+- cache automático de arquivos importados;
+- tolerância adaptativa de curvas;
+- edição vetorial avançada de nós e curvas;
+- biblioteca extensa de materiais e presets;
+- fila ou histórico completo de trabalhos;
+- temas, internacionalização completa e reformulação visual ampla;
+- recursos de nuvem ou colaboração.
+
+Os leitores SVG e G-code já existentes permanecem por compatibilidade, mas não
+recebem desenvolvimento ativo antes do fechamento da V1.
+
+## Próxima ação
+
+Usar a instrumentação atual para atacar os dois custos dominantes do
+`teste_Chaveiro.dxf`: leitura pelo `ezdxf` e composição topológica. Depois de
+fechar e medir esse marco, iniciar o modelo procedural de instâncias e o array
+retangular antes de retomar o raster grayscale.
