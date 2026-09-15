@@ -6,9 +6,53 @@ from collections import defaultdict, deque
 import math
 
 from .model import (
-    AffineTransform, LineSegment, Point, SourceReference, VectorObject,
-    VectorPath,
+    AffineTransform, ArcSegment, CubicBezierSegment, LineSegment, Point,
+    SourceReference, VectorObject, VectorPath,
 )
+
+
+def reverse_segment(segment):
+    """Reverse a canonical segment without losing its analytic geometry."""
+    if isinstance(segment, LineSegment):
+        return LineSegment(segment.end, segment.start)
+    if isinstance(segment, CubicBezierSegment):
+        return CubicBezierSegment(
+            segment.end, segment.control2, segment.control1, segment.start
+        )
+    if isinstance(segment, ArcSegment):
+        return ArcSegment(
+            segment.end, segment.start, segment.center, not segment.clockwise
+        )
+    raise TypeError("Tipo de segmento vetorial não suportado.")
+
+
+def transform_segment(segment, transform):
+    """Apply an affine transform while retaining the segment type."""
+    if isinstance(segment, LineSegment):
+        return LineSegment(transform.apply(segment.start), transform.apply(segment.end))
+    if isinstance(segment, CubicBezierSegment):
+        return CubicBezierSegment(
+            transform.apply(segment.start),
+            transform.apply(segment.control1),
+            transform.apply(segment.control2),
+            transform.apply(segment.end),
+        )
+    if isinstance(segment, ArcSegment):
+        # A circular arc stays circular only under a similarity transform.
+        dot = transform.a*transform.c + transform.b*transform.d
+        scale_x2 = transform.a*transform.a + transform.b*transform.b
+        scale_y2 = transform.c*transform.c + transform.d*transform.d
+        if not math.isclose(dot, 0.0, abs_tol=1e-12) or not math.isclose(
+            scale_x2, scale_y2, rel_tol=1e-12, abs_tol=1e-12
+        ):
+            raise ValueError("Uma transformação não uniforme converteria o arco em elipse.")
+        determinant = transform.a*transform.d-transform.b*transform.c
+        return ArcSegment(
+            transform.apply(segment.start), transform.apply(segment.end),
+            transform.apply(segment.center),
+            segment.clockwise if determinant >= 0 else not segment.clockwise,
+        )
+    raise TypeError("Tipo de segmento vetorial não suportado.")
 
 
 def _point_line_distance(point, start, end):
@@ -43,6 +87,8 @@ def _rdp(points, tolerance):
 def simplify_vector_path(path, tolerance_mm=0.0127):
     """Simplify a line path without opening a closed contour."""
     if tolerance_mm <= 0 or len(path.segments) <= 1:
+        return path
+    if not all(isinstance(segment, LineSegment) for segment in path.segments):
         return path
     points = [path.segments[0].start]
     points.extend(segment.end for segment in path.segments)
@@ -126,7 +172,7 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
             _, index, at_start = match
             unused.remove(index)
             segment = segments[index]
-            ordered.append(segment if at_start else LineSegment(segment.end, segment.start))
+            ordered.append(segment if at_start else reverse_segment(segment))
 
         while True:
             match = nearest(ordered[0].start)
@@ -135,7 +181,7 @@ def stitch_line_segments(segments, tolerance_mm=0.0127):
             _, index, at_start = match
             unused.remove(index)
             segment = segments[index]
-            ordered.appendleft(LineSegment(segment.end, segment.start) if at_start else segment)
+            ordered.appendleft(reverse_segment(segment) if at_start else segment)
 
         closed = math.hypot(
             ordered[0].start.x-ordered[-1].end.x,
@@ -159,15 +205,10 @@ def compose_vector_objects(vectors, tolerance_mm=0.0127,
         group["sources"].append(vector.source)
         for path in vector.paths:
             for segment in path.segments:
-                if not isinstance(segment, LineSegment):
-                    raise TypeError("A composição atual requer segmentos achatados.")
                 if vector.transform == AffineTransform():
                     group["segments"].append(segment)
                 else:
-                    group["segments"].append(LineSegment(
-                        vector.transform.apply(segment.start),
-                        vector.transform.apply(segment.end),
-                    ))
+                    group["segments"].append(transform_segment(segment, vector.transform))
 
     # Importers can hand over their mutable source list. Clearing it here drops
     # thousands of VectorObject/VectorPath containers before the spatial index

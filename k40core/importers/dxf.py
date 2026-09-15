@@ -11,6 +11,7 @@ from k40core.topology import compose_vector_objects
 
 from k40core.model import (
     Color,
+    CubicBezierSegment,
     FillObject,
     ImportIssue,
     ImportSource,
@@ -31,21 +32,55 @@ from k40core.model import (
 _FILL_ENTITY_TYPES = {"HATCH", "SOLID", "TRACE"}
 
 
-def _flatten_entity_paths(entity, tolerance_source):
-    """Return one or more WCS point sequences for paths or filled entities."""
+def _entity_paths(entity):
+    """Return reusable analytic WCS paths without flattening curves."""
     from ezdxf.path import from_hatch, make_path
 
-    entity_type = entity.dxftype()
-    if entity_type == "HATCH":
-        return [tuple(path.flattening(distance=tolerance_source, segments=4))
-                for path in from_hatch(entity)]
-    if entity_type in {"SOLID", "TRACE"}:
-        vertices = list(entity.wcs_vertices())
-        if vertices and vertices[-1] != vertices[0]:
-            vertices.append(vertices[0])
-        return [tuple(vertices)]
-    path = make_path(entity)
-    return [tuple(path.flattening(distance=tolerance_source, segments=4))]
+    return list(from_hatch(entity)) if entity.dxftype() == "HATCH" else [make_path(entity)]
+
+
+def _model_vector_paths(source_paths, projection, to_mm):
+    """Convert ezdxf line/quadratic/cubic commands to canonical paths."""
+    from ezdxf.path.commands import Command
+
+    result = []
+    for source_path in source_paths:
+        current = _project_point(source_path.start, projection, to_mm)
+        segments = []
+
+        def flush(closed=False):
+            nonlocal segments
+            if segments:
+                result.append(VectorPath(tuple(segments), closed=closed))
+                segments = []
+
+        for command in source_path:
+            end = _project_point(command.end, projection, to_mm)
+            if command.type == Command.LINE_TO:
+                if current != end:
+                    segments.append(LineSegment(current, end))
+            elif command.type == Command.CURVE4_TO:
+                segments.append(CubicBezierSegment(
+                    current,
+                    _project_point(command.ctrl1, projection, to_mm),
+                    _project_point(command.ctrl2, projection, to_mm),
+                    end,
+                ))
+            elif command.type == Command.CURVE3_TO:
+                control = _project_point(command.ctrl, projection, to_mm)
+                segments.append(CubicBezierSegment(
+                    current,
+                    Point(current.x + (control.x-current.x)*2.0/3.0,
+                          current.y + (control.y-current.y)*2.0/3.0),
+                    Point(end.x + (control.x-end.x)*2.0/3.0,
+                          end.y + (control.y-end.y)*2.0/3.0),
+                    end,
+                ))
+            elif command.type == Command.MOVE_TO:
+                flush(False)
+            current = end
+        flush(bool(source_path.is_closed))
+    return tuple(result)
 
 
 class DxfImportError(Exception):
@@ -231,29 +266,30 @@ def import_dxf_document(
 
     coordinate_ranges = [[float("inf"), float("-inf")] for _ in range(3)]
     analyzable = 0
+    prepared_entities = []
     phase_started = perf_counter()
     report_progress(progress, "analyzing", message="Analisando entidades e plano do desenho...")
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
         check_cancelled(cancelled)
         entity_type = entity.dxftype()
-        flattened_paths = None
+        source_paths = None
         try:
-            flattened_paths = _flatten_entity_paths(entity, tolerance_source)
-            if not any(len(item) >= 2 for item in flattened_paths):
+            source_paths = _entity_paths(entity)
+            if not source_paths or not any(len(path) for path in source_paths):
                 continue
             analyzable += 1
-            for flattened in flattened_paths:
-                for point in flattened:
+            prepared_entities.append((index, entity, source_paths))
+            for source_path in source_paths:
+                for point in source_path.control_vertices():
                     for axis in range(3):
                         value = float(point[axis])
                         coordinate_ranges[axis][0] = min(coordinate_ranges[axis][0], value)
                         coordinate_ranges[axis][1] = max(coordinate_ranges[axis][1], value)
         except (TypeError, ValueError, AttributeError, NotImplementedError):
-            pass
+            skipped[entity_type] += 1
         if index % progress_batch == 0:
             report_progress(progress, "analyzing", index, message=f"{index} entidades analisadas...")
-        flattened_paths = None
-        del entity
+        source_paths = None
 
     if not analyzable:
         raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
@@ -289,10 +325,9 @@ def import_dxf_document(
     report_progress(progress, "converting", 0, analyzable, "Convertendo entidades DXF...")
     phase_started = perf_counter()
     converted = 0
-    for index, entity in enumerate(recursive_decompose(document.modelspace())):
+    for prepared_index, (index, entity, source_paths) in enumerate(prepared_entities):
         check_cancelled(cancelled)
         entity_type = entity.dxftype()
-        flattened_paths = None
         points = None
         segments = None
         layer_name = _effective_layer_name(entity)
@@ -319,11 +354,12 @@ def import_dxf_document(
             layer_name=layer_name,
         )
         try:
-            flattened_paths = _flatten_entity_paths(entity, tolerance_source)
-            flattened = flattened_paths[0] if flattened_paths else ()
             if entity_type in _FILL_ENTITY_TYPES:
                 fill_paths = []
-                for source_points in flattened_paths:
+                for source_path in source_paths:
+                    source_points = tuple(source_path.flattening(
+                        distance=tolerance_source, segments=4
+                    ))
                     points = tuple(_project_point(point, projection, to_mm)
                                    for point in source_points)
                     segments = tuple(
@@ -362,17 +398,16 @@ def import_dxf_document(
                         source=reference,
                     ))
                 converted += 1
-                if index % progress_batch == 0:
+                if prepared_index % progress_batch == 0:
                     report_progress(
                         progress, "converting", converted, analyzable,
                         message=f"{converted} de {analyzable} objetos convertidos...",
                     )
-                flattened_paths = None
+                source_paths = None
                 del entity
                 continue
-            points = tuple(_project_point(point, projection, to_mm) for point in flattened)
-            segments = tuple(LineSegment(start, end) for start, end in zip(points, points[1:]) if start != end)
-            if not segments:
+            model_paths = _model_vector_paths(source_paths, projection, to_mm)
+            if not model_paths:
                 skipped[entity_type] += 1
                 continue
             properties = context.resolve_all(entity)
@@ -384,18 +419,18 @@ def import_dxf_document(
             result.vectors.append(
                 VectorObject(
                     id=object_id,
-                    paths=(VectorPath(segments=segments, closed=points[0] == points[-1]),),
+                    paths=model_paths,
                     layer_id=layer_id,
                     operation=operation,
                     style=VectorStyle(stroke=color, visible=visible),
                     source=reference,
-                    metadata={"flattening_tolerance_mm": tolerance_mm},
+                    metadata={"analytic_geometry": True},
                 )
             )
             converted += 1
         except (TypeError, ValueError, AttributeError, NotImplementedError):
             skipped[entity_type] += 1
-        if index % progress_batch == 0:
+        if prepared_index % progress_batch == 0:
             report_progress(
                 progress,
                 "converting",
@@ -403,10 +438,12 @@ def import_dxf_document(
                 analyzable,
                 message=f"{converted} de {analyzable} objetos convertidos...",
             )
-        flattened_paths = None
+        source_paths = None
         points = None
         segments = None
         del entity
+
+    prepared_entities.clear()
 
     timings["converting"] = perf_counter() - phase_started
     source_object_count = len(result.vectors)

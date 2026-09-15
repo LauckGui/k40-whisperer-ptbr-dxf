@@ -12,7 +12,7 @@ from k40core.importers.dxf import (
     import_dxf_document,
 )
 from k40core.legacy import vector_lines_in_inches
-from k40core.model import Operation, Unit
+from k40core.model import CubicBezierSegment, Operation, Unit
 from modern_importers import import_dxf
 
 
@@ -108,6 +108,25 @@ class DxfImporterTests(unittest.TestCase):
         self.assertAlmostEqual((circle.bounds.min_x + circle.bounds.max_x) / 2.0, 57.0)
         self.assertAlmostEqual((circle.bounds.min_y + circle.bounds.max_y) / 2.0, 5.0)
         self.assertAlmostEqual(circle.bounds.width, 120.0, places=2)
+
+    def test_circle_remains_analytic_until_legacy_conversion(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        drawing.modelspace().add_circle((10, 20), 5, dxfattribs={"color": 1})
+        drawing.saveas(path)
+
+        document = import_dxf_document(path)
+        circle = document.vectors[0]
+
+        self.assertTrue(circle.metadata["topology_composed"])
+        self.assertTrue(any(isinstance(segment, CubicBezierSegment)
+                            for vector_path in circle.paths
+                            for segment in vector_path.segments))
+        legacy_lines = vector_lines_in_inches(document, Operation.VECTOR_CUT)
+        self.assertGreater(len(legacy_lines), 16)
+        self.assertAlmostEqual(legacy_lines[0][0], legacy_lines[-1][2])
+        self.assertAlmostEqual(legacy_lines[0][1], legacy_lines[-1][3])
 
     def test_non_planar_geometry_is_rejected(self):
         path = self._path()

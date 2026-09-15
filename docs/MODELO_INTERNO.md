@@ -20,9 +20,10 @@ protocolo da máquina.
 ## Vetores
 
 `VectorObject` contém um ou mais `VectorPath`. O contrato já prevê linhas,
-arcos e Bézier cúbicas. Nesta primeira etapa, o DXF converte curvas em linhas
-usando uma tolerância explícita e registra essa tolerância no objeto. A evolução
-posterior poderá preservar curvas nativas sem alterar o restante do documento.
+arcos e Bézier cúbicas. O DXF preserva linhas e comandos Bézier analíticos no
+documento canônico; quadráticas são convertidas exatamente para Bézier cúbicas.
+A discretização só acontece na fronteira do backend legado, usando tolerância
+explícita, sem contaminar o modelo interno com segmentos de aproximação.
 
 O mapeamento histórico azul → gravação e demais cores → corte ocorre somente na
 fronteira DXF. Depois da importação, `operation` pode ser alterada sem recolorir
@@ -69,29 +70,32 @@ unidos, evitando conectar processos diferentes.
 O DXF agora executa essa composição ainda na thread de importação. Objetos com
 camada, operação, cor, espessura e visibilidade compatíveis tornam-se um objeto
 com múltiplos caminhos. Em seguida, Ramer–Douglas–Peucker remove pontos
-redundantes dentro da mesma tolerância usada para achatar as curvas. Contornos
-fechados permanecem fechados, extremidades abertas são preservadas e os handles
-de origem ficam registrados no objeto composto. O adaptador legado reconhece o
-resultado e não repete a análise topológica.
+redundantes apenas de caminhos formados integralmente por linhas. Curvas
+analíticas não são simplificadas nem achatadas. Contornos fechados permanecem
+fechados, extremidades abertas são preservadas e os handles de origem ficam
+registrados no objeto composto. O adaptador legado reconhece o resultado e não
+repete a análise topológica.
 
-No arquivo real `teste_Chaveiro.dxf`, a etapa reduziu 13.736 objetos e 1.047.472
-segmentos para 3 objetos, 3.498 caminhos e 108.608 segmentos.
+No arquivo real `teste_Chaveiro.dxf`, a etapa reduz 13.736 objetos para 3
+objetos, 3.498 caminhos e 108.608 segmentos analíticos. Esse arquivo está
+totalmente explodido em linhas, portanto não se beneficia da preservação de
+curvas. Em uma medição local, a importação levou 138,5 s: 79,1 s na leitura do
+DXF, 16,4 s na análise, 12,6 s na conversão e 30,4 s na composição. A adaptação
+final para 108.608 linhas legadas levou apenas 0,68 s.
 
 ## Compatibilidade legada
 
-`k40core.legacy.vector_lines_in_inches` converte vetores achatados para a lista
-`[x0, y0, x1, y1]` em polegadas atualmente consumida por `ECoord`. O adaptador é
-temporário e permite integrar o novo modelo sem reescrever de imediato o envio
-para a controladora Nano.
+`k40core.legacy.vector_lines_in_inches` discretiza curvas sob demanda e converte
+os vetores para a lista `[x0, y0, x1, y1]` em polegadas atualmente consumida
+por `ECoord`. O adaptador é temporário e permite integrar o novo modelo sem
+reescrever de imediato o envio para a controladora Nano.
 
 ## Próximos incrementos DXF
 
 1. Criar fixtures versionadas de entidades DXF e resultados dourados.
 2. Definir a matriz de entidades suportadas e comportamento por versão DXF.
-3. Preservar arcos, círculos, elipses e splines sem achatamento prematuro.
-4. Tratar blocos, inserções, transformações, layers ocultos e propriedades BYLAYER.
-5. Integrar o novo documento ao fluxo `Open_DXF`, mantendo fallback controlado.
-6. Comparar coordenadas e limites com o parser legado antes de torná-lo padrão.
+3. Ampliar fixtures analíticas para elipses e splines complexas.
+4. Comparar coordenadas e limites com aplicações CAD de referência.
 
 ## Regressões DXF conhecidas
 
@@ -128,9 +132,11 @@ durante leitura e análise inicial; após a contagem das entidades convertíveis
 passa ao modo percentual durante a conversão e chega a 100% antes da publicação
 do documento.
 
-A análise do plano e a conversão percorrem as entidades incrementalmente. Os
-pontos achatados de cada entidade são liberados antes do próximo lote, evitando
-manter uma segunda cópia completa da geometria na memória. O importador publica
+A análise do plano de projeção decompõe cada entidade uma única vez e conserva
+temporariamente seus comandos analíticos. A conversão reutiliza esses comandos,
+eliminando o segundo percurso de decomposição e o segundo achatamento que antes
+dominavam o tempo de arquivos densos. Apenas preenchimentos são discretizados
+para o rasterizador. O importador publica
 as fases de leitura, análise, conversão e conclusão, com atualização a cada 250
 entidades. Não há paralelização interna de entidades: isso preserva ordem e
 determinismo e evita compartilhar estruturas do `ezdxf` entre threads.

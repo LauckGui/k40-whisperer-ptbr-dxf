@@ -1,7 +1,8 @@
 import unittest
 
 from k40core.model import (
-    Color, LineSegment, Operation, Point, VectorObject, VectorPath, VectorStyle,
+    Color, CubicBezierSegment, LineSegment, Operation, Point, VectorObject,
+    VectorPath, VectorStyle,
 )
 from k40core.topology import (
     compose_vector_objects, simplify_vector_path, stitch_line_segments,
@@ -63,6 +64,19 @@ class TopologyTests(unittest.TestCase):
         cut = next(item for item in composed if item.operation is Operation.VECTOR_CUT)
         self.assertEqual(len(cut.paths), 1)
         self.assertEqual(len(cut.paths[0].segments), 1)
+
+    def test_composition_reverses_cubic_without_flattening_it(self):
+        curve = CubicBezierSegment(
+            Point(10, 0), Point(8, 4), Point(2, 4), Point(0, 0)
+        )
+        line = LineSegment(Point(10, 0), Point(20, 0))
+
+        paths = stitch_line_segments((line, curve))
+
+        self.assertEqual(len(paths), 1)
+        self.assertIsInstance(paths[0].segments[0], CubicBezierSegment)
+        self.assertEqual(paths[0].segments[0].control1, Point(2, 4))
+        self.assertEqual(paths[0].segments[0].control2, Point(8, 4))
 
 
 if __name__ == "__main__":
