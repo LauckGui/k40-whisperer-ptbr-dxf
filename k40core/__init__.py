@@ -26,5 +26,8 @@ from .model import (
 from .rasterizer import RasterizationError, rasterize_fills
 from .tessellation import adaptive_line_segments, adaptive_segment_points
 from .topology import compose_vector_objects, simplify_vector_path, stitch_line_segments
+from .transforms import (
+    apply_document_transform, editable_bounds, reflection, rotation, uniform_scale,
+)
 
 __all__ = [name for name in globals() if not name.startswith("_")]

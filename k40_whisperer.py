@@ -38,7 +38,9 @@ from k40core.configuration import (ConfigurationError, configuration_path,
 from k40core.coordinates import display_y, origin_for_reference
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
-from k40core.model import Bounds, InstanceArray, Operation
+from k40core.model import Bounds, InstanceArray, Operation, Point
+from k40core.transforms import (apply_document_transform, editable_bounds,
+                                reflection, rotation, uniform_scale)
 from k40core.preview import (iter_preview_polylines, model_origin_canvas,
                              rectangular_trace, ruler_values,
                              transparent_raster_preview)
@@ -210,6 +212,12 @@ class Application(Frame):
                                    outline=color, width=width)
             draw.rounded_rectangle((p(9),p(9),p(21),p(21)), radius=p(1),
                                    fill="white", outline=color, width=width)
+        elif name == "transform":
+            draw.rectangle((p(4),p(4),p(16),p(16)), outline=color, width=width)
+            draw.line((p(12),p(1),p(12),p(8)), fill=color, width=width)
+            draw.polygon(((p(12),p(1)),(p(8),p(6)),(p(16),p(6))), fill=color)
+            draw.line((p(19),p(12),p(12),p(12)), fill=color, width=width)
+            draw.polygon(((p(19),p(12)),(p(14),p(8)),(p(14),p(16))), fill=color)
         elif name == "preview":
             draw.rectangle((p(3),p(5),p(21),p(19)), outline=color, width=width)
             draw.polygon(((p(10),p(8)),(p(17),p(12)),(p(10),p(16))), fill=color)
@@ -771,6 +779,8 @@ class Application(Frame):
         self.Reload_Button     = Button(self.master,text="Recarregar Vetor", command=self.menu_Reload_Design)
         self.Array_Button      = Button(self.master, text="Múltiplas Cópias",
                                         command=self.MULTIPLE_COPIES_Window)
+        self.Edit_Button       = Button(self.master, text="Editar desenho",
+                                        command=self.EDIT_VECTOR_Window)
         
         self.Home_Button       = Button(self.master,text="Origem",          command=self.Home)
         self.UnLock_Button     = Button(self.master,text="Liberar eixos",   command=self.Unlock)
@@ -841,6 +851,7 @@ class Application(Frame):
             "folder": self.make_ui_icon("folder", 20),
             "reload": self.make_ui_icon("reload", 20),
             "copies": self.make_ui_icon("copies", 20),
+            "transform": self.make_ui_icon("transform", 20),
             "preview": self.make_ui_icon("preview", 18, "white"),
             "home": self.make_ui_icon("home", 20),
             "unlock": self.make_ui_icon("unlock", 20),
@@ -859,6 +870,7 @@ class Application(Frame):
         self.Open_Button.configure(image=self.ui_icons["folder"], compound=LEFT)
         self.Reload_Button.configure(image=self.ui_icons["reload"], compound=LEFT)
         self.Array_Button.configure(image=self.ui_icons["copies"], compound=LEFT)
+        self.Edit_Button.configure(image=self.ui_icons["transform"], compound=LEFT)
         self.Home_Button.configure(image=self.ui_icons["home"], compound=LEFT)
         self.UnLock_Button.configure(image=self.ui_icons["unlock"], compound=LEFT)
         self.GoTo_Button.configure(image=self.ui_icons["target_compact"], compound=LEFT)
@@ -873,7 +885,7 @@ class Application(Frame):
                                       fg="white", padx=2)
         self.Preview_Menu_Button.configure(fg="white", padx=0)
         for button in (self.Initialize_Button, self.Open_Button, self.Reload_Button,
-                       self.Array_Button,
+                       self.Array_Button, self.Edit_Button,
                        self.Home_Button, self.UnLock_Button, self.GoTo_Button,
                        self.Run_Button, self.Pause_Button, self.Stop_Button,
                        self.Preview_Button):
@@ -5175,6 +5187,8 @@ class Application(Frame):
                 self.Reload_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 Yloc=Yloc+standard_button_h+4
                 self.Array_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
+                Yloc=Yloc+standard_button_h+4
+                self.Edit_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
                     self.separator1.place(x=8, y=Yloc, width=334, height=1)
@@ -6537,17 +6551,147 @@ class Application(Frame):
             trace_variable(variable, refresh_preview)
         refresh_preview()
 
-    def _rebuild_array_legacy_data(self, previous_arrays=None):
+    def EDIT_VECTOR_Window(self):
+        """Open the non-destructive editor for an imported canonical job."""
+        if self.GUI_Disabled:
+            return
+        if self.job_document is None:
+            self.statusbar.configure(bg='yellow')
+            self.statusMessage.set("Importe um DXF antes de editar o desenho.")
+            return
+        bounds = editable_bounds(self.job_document)
+        if bounds is None or bounds.width <= 0.0 or bounds.height <= 0.0:
+            self.statusbar.configure(bg='yellow')
+            self.statusMessage.set("O desenho não possui dimensões válidas para edição.")
+            return
+
+        editor = Toplevel(self.master)
+        editor.title("Editar desenho")
+        editor.geometry("510x355")
+        editor.minsize(510, 355)
+        editor.resizable(0, 0)
+        editor.transient(self.master)
+        editor.grab_set()
+
+        scale_percent = StringVar(value="100")
+        angle_degrees = StringVar(value="0")
+        summary = StringVar()
+        message = StringVar()
+
+        container = Frame(editor, padx=14, pady=12)
+        container.pack(fill=BOTH, expand=1)
+        Label(container, textvariable=summary, anchor=W, justify=LEFT).pack(fill=X, pady=(0, 9))
+        Label(container,
+              text="As transformações usam o centro da peça fonte. Escala uniforme preserva círculos e arcos; cópias procedurais continuam como array.",
+              anchor=W, justify=LEFT, wraplength=470, fg="#4b5563").pack(fill=X, pady=(0, 9))
+
+        scale_frame = LabelFrame(container, text="Escala uniforme", padx=9, pady=7)
+        scale_frame.pack(fill=X, pady=(0, 8))
+        Label(scale_frame, text="Escala (%)").grid(row=0, column=0, sticky=W, padx=(0, 6))
+        Entry(scale_frame, textvariable=scale_percent, justify=RIGHT, width=10).grid(
+            row=0, column=1, sticky=W)
+
+        rotation_frame = LabelFrame(container, text="Rotação", padx=9, pady=7)
+        rotation_frame.pack(fill=X, pady=(0, 8))
+        Label(rotation_frame, text="Ângulo (graus)").grid(row=0, column=0, sticky=W, padx=(0, 6))
+        Entry(rotation_frame, textvariable=angle_degrees, justify=RIGHT, width=10).grid(
+            row=0, column=1, sticky=W)
+
+        mirror_frame = LabelFrame(container, text="Espelhamento", padx=9, pady=7)
+        mirror_frame.pack(fill=X, pady=(0, 8))
+        Label(mirror_frame, text="Horizontal inverte esquerda/direita; vertical inverte cima/baixo.",
+              anchor=W, fg="#4b5563").pack(fill=X)
+
+        def source_center():
+            current = editable_bounds(self.job_document)
+            return Point((current.min_x+current.max_x)/2.0,
+                         (current.min_y+current.max_y)/2.0)
+
+        def refresh_summary():
+            current = editable_bounds(self.job_document)
+            suffix = " | array ativo" if self.job_document.arrays else ""
+            summary.set("Peça fonte: %.2f × %.2f mm%s" % (
+                current.width, current.height, suffix))
+
+        def apply_scale():
+            try:
+                factor = float(scale_percent.get().replace(",", "."))/100.0
+                self._apply_document_edit(
+                    uniform_scale(factor, source_center()),
+                    "Escala aplicada: %.2f%%." % (factor*100.0),
+                )
+                editor.destroy()
+            except ValueError as exc:
+                message.set(str(exc))
+
+        def apply_rotation():
+            try:
+                degrees = float(angle_degrees.get().replace(",", "."))
+                self._apply_document_edit(
+                    rotation(degrees, source_center()),
+                    "Rotação aplicada: %.2f°." % degrees,
+                )
+                editor.destroy()
+            except ValueError as exc:
+                message.set(str(exc))
+
+        def apply_reflection(horizontal):
+            self._apply_document_edit(
+                reflection(horizontal, source_center()),
+                "Espelhamento %s aplicado." % ("horizontal" if horizontal else "vertical"),
+            )
+            editor.destroy()
+
+        controls = Frame(container)
+        controls.pack(fill=X, pady=(1, 0))
+        Button(controls, text="Aplicar escala", command=apply_scale).pack(side=LEFT)
+        Button(controls, text="Girar", command=apply_rotation).pack(side=LEFT, padx=6)
+        Button(controls, text="Espelhar horizontal", command=lambda: apply_reflection(True)).pack(
+            side=LEFT)
+        Button(controls, text="Espelhar vertical", command=lambda: apply_reflection(False)).pack(
+            side=LEFT, padx=6)
+        Button(container, text="Fechar", width=11, command=editor.destroy).pack(anchor=E, pady=(6, 0))
+        Label(container, textvariable=message, fg="#b42318", anchor=W).pack(fill=X)
+        refresh_summary()
+
+    def _apply_document_edit(self, transform, success_message):
+        """Mutate canonical transforms then rebuild legacy data off the Tk thread."""
+        document = self.job_document
+        previous = (list(document.vectors), list(document.rasters), list(document.fills))
+
+        def rollback():
+            document.vectors[:], document.rasters[:], document.fills[:] = previous
+            document.validate()
+
+        try:
+            apply_document_transform(document, transform)
+        except Exception:
+            rollback()
+            raise
+        self._rebuild_array_legacy_data(
+            rollback=rollback,
+            progress_message="Atualizando desenho editado...",
+            success_message=success_message,
+            failure_message="Falha ao editar desenho",
+        )
+
+    def _rebuild_array_legacy_data(self, previous_arrays=None, rollback=None,
+                                   progress_message="Preparando múltiplas cópias...",
+                                   success_message=None,
+                                   failure_message="Falha ao criar múltiplas cópias"):
         if self.job_document is None or self.array_build_thread is not None:
             return
         self.set_gui("disabled")
         self.statusbar.configure(bg='#f0ad4e')
-        self.statusMessage.set("Preparando múltiplas cópias...")
+        self.statusMessage.set(progress_message)
         self.import_progress.configure(mode="indeterminate", maximum=100, value=0)
         self.import_progress.pack(anchor=SW, fill=X, side=BOTTOM, padx=2, pady=(1, 0))
         self.import_progress.start(12)
         self.array_build_queue = queue.Queue()
         self.array_previous_arrays = previous_arrays
+        self.document_rebuild_rollback = rollback
+        self.document_rebuild_success_message = success_message
+        self.document_rebuild_failure_message = failure_message
         document = self.job_document
 
         def worker():
@@ -6594,11 +6738,15 @@ class Application(Frame):
         self.array_build_queue = None
         self.set_gui("normal")
         if event == "error":
-            if self.array_previous_arrays is not None:
+            if self.document_rebuild_rollback is not None:
+                self.document_rebuild_rollback()
+            elif self.array_previous_arrays is not None:
                 self.job_document.arrays[:] = self.array_previous_arrays
             self.array_previous_arrays = None
+            self.document_rebuild_rollback = None
             self.statusbar.configure(bg='red')
-            self.statusMessage.set("Falha ao criar múltiplas cópias: %s" % payload)
+            self.statusMessage.set("%s: %s" % (self.document_rebuild_failure_message, payload))
+            self.document_rebuild_failure_message = None
             return
 
         self.VcutData, self.VengData, raster_image, raster_dpi = payload
@@ -6610,6 +6758,9 @@ class Application(Frame):
             self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
             self.SCALE = 0
         self.array_previous_arrays = None
+        success_message = self.document_rebuild_success_message
+        self.document_rebuild_rollback = None
+        self.document_rebuild_success_message = None
         bounds = self.job_document.bounds
         if bounds is not None:
             self.Design_bounds = (
@@ -6619,7 +6770,11 @@ class Application(Frame):
         total = (self.job_document.arrays[0].columns*self.job_document.arrays[0].rows
                  if self.job_document.arrays else 1)
         self.statusbar.configure(bg='white')
-        if raster_image is not None and raster_dpi < previous_raster_dpi-0.01:
+        if success_message is not None:
+            if raster_image is not None and raster_dpi < previous_raster_dpi-0.01:
+                success_message += " Raster ajustado para %.0f DPI." % raster_dpi
+            self.statusMessage.set(success_message)
+        elif raster_image is not None and raster_dpi < previous_raster_dpi-0.01:
             self.statusMessage.set(
                 "Múltiplas cópias: %d peças; raster ajustado para %.0f DPI." %
                 (total, raster_dpi)
