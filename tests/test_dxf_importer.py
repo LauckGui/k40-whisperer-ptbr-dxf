@@ -4,6 +4,7 @@ import unittest
 
 import ezdxf
 
+from k40core.importing import ImportCancelled
 from k40core.importers.dxf import (
     DxfImportError,
     DxfProjectionRequired,
@@ -204,6 +205,44 @@ class DxfImporterTests(unittest.TestCase):
 
         self.assertEqual(document.vectors[0].operation, Operation.VECTOR_ENGRAVE)
         self.assertEqual(document.vectors[0].style.stroke.hex_rgb, "#0000ff")
+
+    def test_unit_resolver_and_progress_callbacks(self):
+        path = self._path()
+        drawing = ezdxf.new("R12")
+        drawing.modelspace().add_line((0, 0), (10, 0))
+        drawing.saveas(path)
+        phases = []
+
+        document = import_dxf_document(
+            path,
+            unit_resolver=lambda: "Millimeters",
+            progress=lambda event: phases.append(event.phase),
+        )
+
+        self.assertEqual(document.bounds.max_x, 10.0)
+        self.assertIn("reading", phases)
+        self.assertIn("analyzing", phases)
+        self.assertIn("converting", phases)
+        self.assertEqual(phases[-1], "complete")
+
+    def test_cooperative_cancellation_stops_before_conversion(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        drawing.modelspace().add_line((0, 0), (10, 0))
+        drawing.saveas(path)
+        state = {"cancelled": False}
+
+        def progress(event):
+            if event.phase == "analyzing":
+                state["cancelled"] = True
+
+        with self.assertRaises(ImportCancelled):
+            import_dxf_document(
+                path,
+                progress=progress,
+                cancelled=lambda: state["cancelled"],
+            )
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+from k40core.importing import ImportCancelled, check_cancelled, report_progress
+
 from k40core.model import (
     Color,
     ImportIssue,
@@ -52,14 +54,19 @@ _MODEL_UNITS = {
 }
 
 
-def _read_document(filename):
+def _read_document(filename, progress=None, cancelled=None):
     import ezdxf
     from ezdxf import recover
 
+    check_cancelled(cancelled)
+    report_progress(progress, "reading", message="Lendo a estrutura do arquivo DXF...")
     try:
-        return ezdxf.readfile(filename), []
+        document = ezdxf.readfile(filename)
+        report_progress(progress, "reading", 1, 1, "Estrutura DXF carregada.")
+        return document, []
     except ezdxf.DXFStructureError:
         document, auditor = recover.readfile(filename)
+        report_progress(progress, "reading", 1, 1, "Estrutura DXF recuperada.")
         return document, [str(error) for error in auditor.errors]
 
 
@@ -121,15 +128,11 @@ def _effective_color(entity, document, context, layer_name) -> Color | None:
     return _color_from_ezdxf(context.resolve_all(entity).color)
 
 
-def _select_projection(records, tolerance_source, requested):
+def _select_projection(coordinate_ranges, tolerance_source, requested):
     requested = str(requested).lower()
     if requested not in {"auto", "xy", "xz", "yz"}:
         raise ValueError("Plano de projeção deve ser auto, XY, XZ ou YZ.")
-    values = tuple(point for _, _, _, points in records for point in points)
-    ranges = tuple(
-        (min(float(point[axis]) for point in values), max(float(point[axis]) for point in values))
-        for axis in range(3)
-    )
+    ranges = coordinate_ranges
     if requested != "auto":
         return requested, ranges
     for plane, discarded_axis in (("xy", 2), ("xz", 1), ("yz", 0)):
@@ -152,14 +155,25 @@ def import_dxf_document(
     tolerance_mm=0.0127,
     assumed_units=None,
     projection_plane="auto",
+    progress=None,
+    cancelled=None,
+    unit_resolver=None,
+    projection_resolver=None,
+    progress_batch=250,
 ) -> JobDocument:
     from ezdxf import units
     from ezdxf.addons.drawing.properties import RenderContext
     from ezdxf.disassemble import recursive_decompose
     from ezdxf.path import make_path
 
-    document, audit_messages = _read_document(filename)
+    document, audit_messages = _read_document(filename, progress, cancelled)
     unit_code = document.units
+    if unit_code == 0 and assumed_units is None and unit_resolver is not None:
+        check_cancelled(cancelled)
+        assumed_units = unit_resolver()
+        check_cancelled(cancelled)
+        if not assumed_units:
+            raise ImportCancelled("Importação cancelada durante a escolha de unidades.")
     if unit_code == 0 and assumed_units:
         unit_code = _ASSUMED_UNIT_CODES.get(str(assumed_units).lower(), 0)
     if unit_code == 0:
@@ -189,25 +203,50 @@ def import_dxf_document(
     skipped = Counter()
     tolerance_source = tolerance_mm / to_mm
 
-    records = []
+    coordinate_ranges = [[float("inf"), float("-inf")] for _ in range(3)]
+    analyzable = 0
+    report_progress(progress, "analyzing", message="Analisando entidades e plano do desenho...")
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
+        check_cancelled(cancelled)
         entity_type = entity.dxftype()
+        path = None
+        flattened = None
         try:
             path = make_path(entity)
             flattened = tuple(path.flattening(distance=tolerance_source, segments=4))
             if len(flattened) < 2:
-                skipped[entity_type] += 1
                 continue
-            records.append((index, entity, path, flattened))
+            analyzable += 1
+            for point in flattened:
+                for axis in range(3):
+                    value = float(point[axis])
+                    coordinate_ranges[axis][0] = min(coordinate_ranges[axis][0], value)
+                    coordinate_ranges[axis][1] = max(coordinate_ranges[axis][1], value)
         except (TypeError, ValueError, AttributeError, NotImplementedError):
-            skipped[entity_type] += 1
+            pass
+        if index % progress_batch == 0:
+            report_progress(progress, "analyzing", index, message=f"{index} entidades analisadas...")
+        path = None
+        flattened = None
+        del entity
 
-    if not records:
+    if not analyzable:
         raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
-    projection, coordinate_ranges = _select_projection(records, tolerance_source, projection_plane)
+    ranges = tuple((item[0], item[1]) for item in coordinate_ranges)
+    try:
+        projection, ranges = _select_projection(ranges, tolerance_source, projection_plane)
+    except DxfProjectionRequired:
+        if projection_resolver is None:
+            raise
+        check_cancelled(cancelled)
+        selected_projection = projection_resolver()
+        check_cancelled(cancelled)
+        if not selected_projection:
+            raise ImportCancelled("Importação cancelada durante a escolha da projeção.")
+        projection, ranges = _select_projection(ranges, tolerance_source, selected_projection)
     result.source.metadata["projection_plane"] = projection.upper()
     discarded_axis = {"xy": 2, "xz": 1, "yz": 0}[projection]
-    discarded_low, discarded_high = coordinate_ranges[discarded_axis]
+    discarded_low, discarded_high = ranges[discarded_axis]
     if projection != "xy" or abs(discarded_low) > tolerance_source or abs(discarded_high) > tolerance_source:
         result.issues.append(
             ImportIssue(
@@ -221,8 +260,15 @@ def import_dxf_document(
             )
         )
 
-    for index, entity, path, flattened in records:
+    report_progress(progress, "converting", message="Convertendo entidades DXF...")
+    converted = 0
+    for index, entity in enumerate(recursive_decompose(document.modelspace())):
+        check_cancelled(cancelled)
         entity_type = entity.dxftype()
+        path = None
+        flattened = None
+        points = None
+        segments = None
         layer_name = _effective_layer_name(entity)
         layer_id = layer_ids.get(layer_name)
         if layer_id is None:
@@ -247,6 +293,8 @@ def import_dxf_document(
             layer_name=layer_name,
         )
         try:
+            path = make_path(entity)
+            flattened = tuple(path.flattening(distance=tolerance_source, segments=4))
             points = tuple(_project_point(point, projection, to_mm) for point in flattened)
             segments = tuple(LineSegment(start, end) for start, end in zip(points, points[1:]) if start != end)
             if not segments:
@@ -269,8 +317,16 @@ def import_dxf_document(
                     metadata={"flattening_tolerance_mm": tolerance_mm},
                 )
             )
+            converted += 1
         except (TypeError, ValueError, AttributeError, NotImplementedError):
             skipped[entity_type] += 1
+        if index % progress_batch == 0:
+            report_progress(progress, "converting", index, message=f"{converted} objetos convertidos...")
+        path = None
+        flattened = None
+        points = None
+        segments = None
+        del entity
 
     for entity_type, count in sorted(skipped.items()):
         result.issues.append(
@@ -285,4 +341,5 @@ def import_dxf_document(
     if not result.vectors:
         raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
     result.validate()
+    report_progress(progress, "complete", converted, converted, f"{converted} objetos DXF convertidos.")
     return result

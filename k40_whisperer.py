@@ -24,7 +24,6 @@ import sys
 from math import *
 from egv import egv
 from nano_library import K40_CLASS
-from dxf import DXF_CLASS
 from svg_reader import SVG_READER
 from svg_reader import SVG_TEXT_EXCEPTION
 from svg_reader import SVG_PXPI_EXCEPTION
@@ -33,8 +32,7 @@ from interpolate import interpolate
 from ecoords import ECoord
 from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
-from modern_importers import ModernImporterFallback, import_dxf, probe_dxf_units
-from k40core.importers import DxfProjectionRequired
+from modern_importers import import_dxf
 from k40core.model import Bounds
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
@@ -87,6 +85,8 @@ import binascii
 import getopt
 import operator
 import webbrowser
+import queue
+import threading
 from PIL import Image
 from PIL import ImageOps
 from PIL import ImageFilter
@@ -125,6 +125,9 @@ QUIET = False
 class Application(Frame):
     def __init__(self, master):
         self.trace_window = toplevel_dummy()
+        self.dxf_import_thread = None
+        self.dxf_import_queue = None
+        self.dxf_import_cancel = None
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -2145,6 +2148,7 @@ class Application(Frame):
         TYPE=fileExtension.upper()
         if TYPE=='.DXF':
             self.Open_DXF(filename)
+            return
         elif TYPE=='.SVG':
             self.Open_SVG(filename)
         elif TYPE=='.EGV':
@@ -2188,6 +2192,7 @@ class Application(Frame):
         TYPE=fileExtension.upper()
         if TYPE=='.DXF':
             self.Open_DXF(fileselect)
+            return
         elif TYPE=='.SVG':
             self.Open_SVG(fileselect)
         else:
@@ -2757,137 +2762,102 @@ class Application(Frame):
 
         
     def Open_DXF(self,filemname):
-        self.resetPath()
-        
-        self.DXF_FILE = filemname
-        try:
-            dxf_units = probe_dxf_units(self.DXF_FILE)
-            assumed_units = None
-            if not dxf_units or dxf_units == "Unitless":
-                dialog = UnitsDialog(root)
-                assumed_units = dialog.result
-                if not assumed_units:
-                    return
+        if self.dxf_import_thread is not None and self.dxf_import_thread.is_alive():
+            self.statusMessage.set("Já existe uma importação DXF em andamento.")
+            return
 
+        self.dxf_import_queue = queue.Queue()
+        self.dxf_import_cancel = threading.Event()
+        self.set_gui("disabled")
+        self.statusbar.configure(bg='#f0ad4e')
+        self.statusMessage.set("Iniciando importação DXF...")
+
+        def request_from_ui(kind):
+            request = {"kind": kind, "event": threading.Event(), "value": None}
+            self.dxf_import_queue.put(("request", request))
+            while not request["event"].wait(0.1):
+                if self.dxf_import_cancel.is_set():
+                    from k40core.importing import ImportCancelled
+                    raise ImportCancelled("Importação cancelada pelo usuário.")
+            return request["value"]
+
+        def worker():
             try:
                 imported = import_dxf(
-                    self.DXF_FILE,
+                    filemname,
                     tolerance_inches=.0005,
-                    assumed_units=assumed_units,
+                    progress=lambda progress: self.dxf_import_queue.put(("progress", progress)),
+                    cancelled=self.dxf_import_cancel.is_set,
+                    unit_resolver=lambda: request_from_ui("units"),
+                    projection_resolver=lambda: request_from_ui("projection"),
                 )
-            except DxfProjectionRequired:
-                projection_dialog = ProjectionDialog(root)
-                if not projection_dialog.result:
-                    return
-                imported = import_dxf(
-                    self.DXF_FILE,
-                    tolerance_inches=.0005,
-                    assumed_units=assumed_units,
-                    projection_plane=projection_dialog.result,
-                )
-            self.VcutData.make_ecoords(imported.cut, scale=1.0)
-            self.VengData.make_ecoords(imported.engrave, scale=1.0)
-            self.Design_bounds = imported.bounds
-            if imported.warnings:
-                message_box("Importação de DXF:", "\n".join(imported.warnings))
-            return
-        except ModernImporterFallback:
-            # Compatibilidade temporária para arquivos que o novo leitor ainda
-            # não consegue representar com segurança.
-            pass
-        except Exception as exc:
-            msg = "A importação DXF foi interrompida para evitar geometria incorreta:\n%s" % exc
-            self.statusMessage.set(str(exc).split("\n")[0])
-            self.statusbar.configure(bg='red')
-            message_box("Falha ao carregar DXF", msg)
-            debug_message(traceback.format_exc())
-            return
+                self.dxf_import_queue.put(("complete", (filemname, imported)))
+            except Exception as exc:
+                from k40core.importing import ImportCancelled
+                event = "cancelled" if isinstance(exc, ImportCancelled) else "error"
+                self.dxf_import_queue.put((event, exc))
 
-        dxf_import=DXF_CLASS()
-        tolerance = .0005
+        self.dxf_import_thread = threading.Thread(
+            target=worker,
+            name="k40-dxf-import",
+            daemon=True,
+        )
+        self.dxf_import_thread.start()
+        self.master.after(50, self._poll_dxf_import)
+        return
+
+    def _poll_dxf_import(self):
+        terminal = False
         try:
-            fd = open(self.DXF_FILE)
-            dxf_import.GET_DXF_DATA(fd,lin_tol = tolerance,get_units=True,units=None)
-            fd.seek(0)
-            
-            dxf_units = dxf_import.units
-            if dxf_units=="Unitless":
-                d = UnitsDialog(root)
-                dxf_units = d.result
-            if dxf_units=="Inches":
-                dxf_scale = 1.0
-            elif dxf_units=="Feet":
-                dxf_scale = 12.0
-            elif dxf_units=="Miles":
-                dxf_scale = 5280.0*12.0
-            elif dxf_units=="Millimeters":
-                dxf_scale = 1.0/25.4
-            elif dxf_units=="Centimeters":
-                dxf_scale = 1.0/2.54
-            elif dxf_units=="Meters":
-                dxf_scale = 1.0/254.0
-            elif dxf_units=="Kilometers":
-                dxf_scale = 1.0/254000.0
-            elif dxf_units=="Microinches":
-                dxf_scale = 1.0/1000000.0
-            elif dxf_units=="Mils":
-                dxf_scale = 1.0/1000.0
-            else:
-                return    
+            while True:
+                event, payload = self.dxf_import_queue.get_nowait()
+                if event == "progress":
+                    self.statusMessage.set(payload.message or "Importando DXF...")
+                elif event == "request":
+                    if payload["kind"] == "units":
+                        dialog = UnitsDialog(root)
+                    else:
+                        dialog = ProjectionDialog(root)
+                    payload["value"] = dialog.result
+                    payload["event"].set()
+                elif event == "complete":
+                    filename, imported = payload
+                    self.resetPath()
+                    self.DXF_FILE = filename
+                    self.DESIGN_FILE = filename
+                    self.VcutData.make_ecoords(imported.cut, scale=1.0)
+                    self.VengData.make_ecoords(imported.engrave, scale=1.0)
+                    self.Design_bounds = imported.bounds
+                    self.set_gui("normal")
+                    self.statusbar.configure(bg='white')
+                    self.statusMessage.set("DXF importado: %d objetos" % len(imported.document.vectors))
+                    self.menu_View_Refresh()
+                    if imported.warnings:
+                        message_box("Importação de DXF:", "\n".join(imported.warnings))
+                    terminal = True
+                elif event == "cancelled":
+                    self.set_gui("normal")
+                    self.statusbar.configure(bg='yellow')
+                    self.statusMessage.set("Importação DXF cancelada; o desenho anterior foi preservado.")
+                    terminal = True
+                elif event == "error":
+                    self.set_gui("normal")
+                    self.statusbar.configure(bg='red')
+                    self.statusMessage.set(str(payload).split("\n")[0])
+                    message_box(
+                        "Falha ao carregar DXF",
+                        "A importação foi interrompida e o desenho anterior foi preservado:\n%s" % payload,
+                    )
+                    terminal = True
+        except queue.Empty:
+            pass
 
-            lin_tol = tolerance / dxf_scale
-            dxf_import.GET_DXF_DATA(fd,lin_tol=lin_tol,get_units=False,units=None)
-            fd.close()
-        #except StandardError as e:
-        except Exception as e:
-            msg1 = "Falha ao carregar DXF:"
-            msg2 = "%s" %(e)
-            self.statusMessage.set((msg1+msg2).split("\n")[0] )
-            self.statusbar.configure( bg = 'red' )
-            message_box(msg1, msg2)
-            debug_message(traceback.format_exc())
-        except:
-            fmessage("Unable To open Drawing Exchange File (DXF) file.")
-            debug_message(traceback.format_exc())
-            return
-        
-        new_origin=False
-        dxf_engrave_coords = dxf_import.DXF_COORDS_GET_TYPE(engrave=True, new_origin=False)
-        dxf_cut_coords     = dxf_import.DXF_COORDS_GET_TYPE(engrave=False,new_origin=False)
-##        if DEBUG:
-##            dxf_code = dxf_import.WriteDXF(close_loops=False)
-##            fout = open('Z:\\out.dxf','w')
-##            for line in dxf_code:
-##                fout.write(line+'\n')
-##            fout.close
-        
-        if dxf_import.dxf_messages != "":
-            msg_split=dxf_import.dxf_messages.split("\n")
-            msg_split.sort()
-            msg_split.append("")
-            mcnt=1
-            msg_out = ""
-            for i in range(1,len(msg_split)):
-                if msg_split[i-1]==msg_split[i]:
-                    mcnt=mcnt+1
-                else:
-                    if msg_split[i-1]!="":
-                        msg_line = "%s (%d places)\n" %(msg_split[i-1],mcnt)
-                        msg_out = msg_out + msg_line
-                    mcnt=1
-            message_box("Importação de DXF:",msg_out)
-                    
-        ##########################
-        ###   Create ECOORDS   ###
-        ##########################
-        self.VcutData.make_ecoords(dxf_cut_coords    ,scale=dxf_scale)
-        self.VengData.make_ecoords(dxf_engrave_coords,scale=dxf_scale)
-
-        xmin = min(self.VcutData.bounds[0],self.VengData.bounds[0])
-        xmax = max(self.VcutData.bounds[1],self.VengData.bounds[1])
-        ymin = min(self.VcutData.bounds[2],self.VengData.bounds[2])
-        ymax = max(self.VcutData.bounds[3],self.VengData.bounds[3])
-        self.Design_bounds = (xmin,xmax,ymin,ymax)
+        if terminal:
+            self.dxf_import_thread = None
+            self.dxf_import_queue = None
+            self.dxf_import_cancel = None
+        elif self.dxf_import_thread is not None:
+            self.master.after(50, self._poll_dxf_import)
 
 
     def Open_Settings_File(self,filename):
@@ -3470,6 +3440,11 @@ class Application(Frame):
             self.statusMessage.set("Não foi possível pausar: %s" % e)
 
     def Stop_Job(self, event=None):
+        if self.dxf_import_thread is not None and self.dxf_import_thread.is_alive():
+            self.dxf_import_cancel.set()
+            self.statusbar.configure(bg='yellow')
+            self.statusMessage.set("Cancelando importação DXF...")
+            return
         if self.stop[0]:
             return
         try:

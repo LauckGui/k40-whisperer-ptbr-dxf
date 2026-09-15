@@ -84,3 +84,21 @@ Antes do envio físico, largura, altura e posição do trabalho — incluindo
 calibração, rotativo, origem e deslocamento — são comparadas com a área útil
 configurada. A geração de arquivo EGV continua permitida sem essa restrição,
 pois não movimenta equipamento.
+
+## Importação de arquivos grandes
+
+A abertura DXF é executada em uma thread de trabalho; somente a fila de eventos
+e os diálogos são tratados pela thread do Tkinter. O desenho anterior permanece
+ativo até que o novo documento esteja completo e validado. O operador pode
+cancelar usando **Parar**.
+
+A análise do plano e a conversão percorrem as entidades incrementalmente. Os
+pontos achatados de cada entidade são liberados antes do próximo lote, evitando
+manter uma segunda cópia completa da geometria na memória. O importador publica
+as fases de leitura, análise, conversão e conclusão, com atualização a cada 250
+entidades. Não há paralelização interna de entidades: isso preserva ordem e
+determinismo e evita compartilhar estruturas do `ezdxf` entre threads.
+
+Essa arquitetura também prepara o futuro array procedural: uma instância poderá
+referenciar a mesma geometria-base e aplicar apenas sua transformação, sem gerar
+cópias vetoriais durante importação ou preparação.

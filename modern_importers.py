@@ -70,12 +70,25 @@ def probe_dxf_units(filename):
     return _probe_dxf_units(filename)
 
 
-def import_dxf(filename, tolerance_inches=0.0005, assumed_units=None, projection_plane="auto"):
+def import_dxf(
+    filename,
+    tolerance_inches=0.0005,
+    assumed_units=None,
+    projection_plane="auto",
+    progress=None,
+    cancelled=None,
+    unit_resolver=None,
+    projection_resolver=None,
+):
     document = import_dxf_document(
         filename,
         tolerance_mm=tolerance_inches * 25.4,
         assumed_units=assumed_units,
         projection_plane=projection_plane,
+        progress=progress,
+        cancelled=cancelled,
+        unit_resolver=unit_resolver,
+        projection_resolver=projection_resolver,
     )
 
     result = ImportResult(
