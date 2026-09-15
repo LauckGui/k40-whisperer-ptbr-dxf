@@ -34,7 +34,7 @@ from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
 from k40core.configuration import ConfigurationError, load_configuration, save_configuration
-from k40core.coordinates import display_y, machine_y
+from k40core.coordinates import display_y, origin_for_reference
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
@@ -4709,8 +4709,17 @@ class Application(Frame):
         self.menu_View_Refresh()
 
     def GoTo(self):
-        xpos = float(self.gotoX.get())
-        ypos = machine_y(self.gotoY.get())
+        target_x = float(self.gotoX.get())/self.units_scale
+        target_y = float(self.gotoY.get())/self.units_scale
+        origin_x, origin_y = origin_for_reference(
+            target_x, target_y,
+            self.pos_offset[0]/1000.0, self.pos_offset[1]/1000.0,
+            home_on_right=bool(self.HomeUR.get()),
+        )
+        # Rapid_Move receives values in the current UI unit and mirrors X for
+        # right-hand home internally.
+        xpos = (-origin_x if self.HomeUR.get() else origin_x)*self.units_scale
+        ypos = origin_y*self.units_scale
         if self.k40 != None:
             self.k40.home_position()
         self.laserX  = 0.0
