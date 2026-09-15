@@ -34,6 +34,7 @@ from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
 from k40core.configuration import ConfigurationError, load_configuration, save_configuration
+from k40core.coordinates import display_y, machine_y
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
@@ -1201,6 +1202,13 @@ class Application(Frame):
         for name, value in settings.items():
             variable = variables.get(name)
             if variable is not None:
+                if name == "gotoY":
+                    # Configuration files predating the positive-Y interface
+                    # may still contain the old internal negative value.
+                    try:
+                        value = abs(float(value))
+                    except (TypeError, ValueError):
+                        pass
                 variable.set(value)
         self.include_Time.set(1)
 
@@ -1889,8 +1897,8 @@ class Application(Frame):
     def Entry_GoToY_Check(self):
         try:
             value = float(self.gotoY.get())
-            if  value > 0.0:
-                self.statusMessage.set(" O valor deve ser menor ou igual a 0,0 ")
+            if value < 0.0:
+                self.statusMessage.set(" O valor de Y deve ser maior ou igual a 0,0 ")
                 return 2 # Value is invalid number
         except:
             return 3     # Value not a number
@@ -3257,7 +3265,8 @@ class Application(Frame):
                     elif "gotoX"    in line:
                          self.gotoX.set(line[line.find("gotoX"):].split()[1])
                     elif "gotoY"    in line:
-                         self.gotoY.set(line[line.find("gotoY"):].split()[1])
+                         legacy_y = line[line.find("gotoY"):].split()[1]
+                         self.gotoY.set(str(abs(float(legacy_y))))
 
                     elif "bezier_M1"    in line:
                          self.bezier_M1.set(line[line.find("bezier_M1"):].split()[1])
@@ -4701,7 +4710,7 @@ class Application(Frame):
 
     def GoTo(self):
         xpos = float(self.gotoX.get())
-        ypos = float(self.gotoY.get())
+        ypos = machine_y(self.gotoY.get())
         if self.k40 != None:
             self.k40.home_position()
         self.laserX  = 0.0
@@ -4922,13 +4931,15 @@ class Application(Frame):
 
         if self.units.get()=="in":
             X_display = self.laserX + self.pos_offset[0]/1000.0
-            Y_display = self.laserY + self.pos_offset[1]/1000.0
+            Y_display = display_y(self.laserY + self.pos_offset[1]/1000.0)
             W_display = W
             H_display = H
             U_display = self.units.get()
         else:
             X_display = (self.laserX + self.pos_offset[0]/1000.0)*self.units_scale
-            Y_display = (self.laserY + self.pos_offset[1]/1000.0)*self.units_scale
+            Y_display = display_y(
+                self.laserY + self.pos_offset[1]/1000.0
+            )*self.units_scale
             W_display = W*self.units_scale
             H_display = H*self.units_scale
             U_display = self.units.get()
