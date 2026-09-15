@@ -6638,7 +6638,7 @@ class Application(Frame):
         rotation_frame.grid(row=3, column=0, sticky="ew", pady=(0, 7))
         rotation_frame.columnconfigure(1, weight=1)
         Label(rotation_frame, image=self.ui_icons["reload"]).grid(row=0, column=0, padx=(0, 6))
-        Label(rotation_frame, text="Ângulo").grid(row=0, column=1, sticky=W)
+        Label(rotation_frame, text="Ângulo (+ horário)").grid(row=0, column=1, sticky=W)
         Entry(rotation_frame, textvariable=angle_degrees, justify=RIGHT, width=10).grid(
             row=0, column=2, padx=(7, 3))
         Label(rotation_frame, text="graus").grid(row=0, column=3, sticky=W)
@@ -6754,8 +6754,10 @@ class Application(Frame):
             try:
                 degrees = float(angle_degrees.get().replace(",", "."))
                 start_edit(
-                    rotation(degrees, source_center()),
-                    "Rotação aplicada: %.2f°." % degrees,
+                    # O canvas usa o eixo Y invertido visualmente; inverter o
+                    # sinal faz valores positivos seguirem o ícone horário.
+                    rotation(-degrees, source_center()),
+                    "Rotação horária aplicada: %.2f°." % degrees,
                 )
             except ValueError as exc:
                 message.set(str(exc))
