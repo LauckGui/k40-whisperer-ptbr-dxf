@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from time import perf_counter
 
 from k40core.importing import ImportCancelled, check_cancelled, report_progress
 from k40core.topology import compose_vector_objects
@@ -187,7 +188,11 @@ def import_dxf_document(
     from ezdxf.addons.drawing.properties import RenderContext
     from ezdxf.disassemble import recursive_decompose
 
+    total_started = perf_counter()
+    phase_started = total_started
+    timings = {}
     document, audit_messages = _read_document(filename, progress, cancelled)
+    timings["reading"] = perf_counter() - phase_started
     unit_code = document.units
     if unit_code == 0 and assumed_units is None and unit_resolver is not None:
         check_cancelled(cancelled)
@@ -226,6 +231,7 @@ def import_dxf_document(
 
     coordinate_ranges = [[float("inf"), float("-inf")] for _ in range(3)]
     analyzable = 0
+    phase_started = perf_counter()
     report_progress(progress, "analyzing", message="Analisando entidades e plano do desenho...")
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
         check_cancelled(cancelled)
@@ -251,6 +257,7 @@ def import_dxf_document(
 
     if not analyzable:
         raise DxfImportError("O DXF não contém geometria vetorial utilizável.")
+    timings["analyzing"] = perf_counter() - phase_started
     ranges = tuple((item[0], item[1]) for item in coordinate_ranges)
     try:
         projection, ranges = _select_projection(ranges, tolerance_source, projection_plane)
@@ -280,6 +287,7 @@ def import_dxf_document(
         )
 
     report_progress(progress, "converting", 0, analyzable, "Convertendo entidades DXF...")
+    phase_started = perf_counter()
     converted = 0
     for index, entity in enumerate(recursive_decompose(document.modelspace())):
         check_cancelled(cancelled)
@@ -400,6 +408,7 @@ def import_dxf_document(
         segments = None
         del entity
 
+    timings["converting"] = perf_counter() - phase_started
     source_object_count = len(result.vectors)
     source_segment_count = sum(
         len(path.segments) for vector in result.vectors for path in vector.paths
@@ -410,6 +419,7 @@ def import_dxf_document(
             progress, "optimizing", message="Compondo contornos e simplificando caminhos..."
         )
         source_vectors = result.vectors
+        phase_started = perf_counter()
         result.vectors = compose_vector_objects(
             source_vectors,
             tolerance_mm=tolerance_mm,
@@ -437,6 +447,9 @@ def import_dxf_document(
                 "tolerance_mm": tolerance_mm,
             },
         ))
+        timings["optimizing"] = perf_counter() - phase_started
+    else:
+        timings["optimizing"] = 0.0
 
     for entity_type, count in sorted(skipped.items()):
         result.issues.append(
@@ -451,5 +464,12 @@ def import_dxf_document(
     if not result.vectors and not result.fills:
         raise DxfImportError("O DXF não contém geometria utilizável.")
     result.validate()
-    report_progress(progress, "complete", analyzable, analyzable, f"{converted} objetos DXF convertidos.")
+    timings["total"] = perf_counter() - total_started
+    result.source.metadata["timings_seconds"] = {
+        key: round(value, 6) for key, value in timings.items()
+    }
+    report_progress(
+        progress, "complete", analyzable, analyzable,
+        "%d objetos DXF convertidos em %.2f s." % (converted, timings["total"]),
+    )
     return result

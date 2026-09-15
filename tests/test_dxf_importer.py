@@ -228,6 +228,11 @@ class DxfImporterTests(unittest.TestCase):
         self.assertEqual(conversion.total, 1)
         self.assertEqual(events[-1].phase, "complete")
         self.assertEqual(events[-1].completed, events[-1].total)
+        timings = document.source.metadata["timings_seconds"]
+        self.assertEqual(
+            set(timings), {"reading", "analyzing", "converting", "optimizing", "total"}
+        )
+        self.assertGreaterEqual(timings["total"], 0.0)
 
     def test_cooperative_cancellation_stops_before_conversion(self):
         path = self._path()
