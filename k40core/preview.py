@@ -48,6 +48,14 @@ def rectangular_trace(bounds, gap=0.0, loop=1):
     ]
 
 
+def model_origin_canvas(x_left, y_top, x_right, plot_scale,
+                        position_x, position_y, home_on_right=False):
+    """Map the movable machine/model origin to preview canvas coordinates."""
+    x = (x_right-position_x/plot_scale if home_on_right
+         else x_left+position_x/plot_scale)
+    return x, y_top-position_y/plot_scale
+
+
 def transparent_raster_preview(image, size):
     """Return a black RGBA overlay where white/off pixels are transparent."""
     from PIL import Image, ImageOps

@@ -37,8 +37,9 @@ from k40core.configuration import ConfigurationError, load_configuration, save_c
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
-from k40core.preview import (iter_preview_polylines, rectangular_trace,
-                             ruler_values, transparent_raster_preview)
+from k40core.preview import (iter_preview_polylines, model_origin_canvas,
+                             rectangular_trace, ruler_values,
+                             transparent_raster_preview)
 from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
 from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
@@ -1456,6 +1457,7 @@ class Application(Frame):
                 actual_pixel_dx - (event.x-self.move_start_x),
                 actual_pixel_dy - (event.y-self.move_start_y),
             )
+            self._refresh_model_projections()
             self._update_position_status()
         else:
             # Undo the visual drag when the hardware move fails.
@@ -4954,11 +4956,13 @@ class Application(Frame):
             return
 
         self._move_preview_tag('LaserTag', dx_inches, dy_inches)
+        self._refresh_model_projections()
         self._update_position_status()
 
     def _move_preview_dot_by_offset_delta(self, dx_inches, dy_inches):
         """Translate only the temporary head marker; job geometry stays fixed."""
         self._move_preview_tag('LaserDot', dx_inches, dy_inches)
+        self._refresh_model_projections()
         self._update_position_status()
 
     def _move_preview_tag(self, tag, dx_inches, dy_inches):
@@ -5788,17 +5792,53 @@ class Application(Frame):
             ruler_left, y_top, x_rgt, y_top, fill="#1480a8", width=2,
             tags="Ruler"
         )
-        if model_x is not None and model_y is not None:
-            if visible_left <= model_x <= visible_right:
-                self.PreviewCanvas.create_line(
-                    model_x, model_y, model_x, ruler_top,
-                    fill="#d97706", width=2, dash=(6, 3), tags="Ruler"
-                )
-            if visible_top <= model_y <= visible_bottom:
-                self.PreviewCanvas.create_line(
-                    model_x, model_y, ruler_left, model_y,
-                    fill="#d97706", width=2, dash=(6, 3), tags="Ruler"
-                )
+        self.preview_machine_geometry = (x_lft, y_top, x_rgt, y_bot)
+        self._draw_model_projections(
+            x_lft, y_top, x_rgt, y_bot, model_x, model_y
+        )
+
+    def _draw_model_projections(self, x_lft, y_top, x_rgt, y_bot,
+                                model_x, model_y):
+        """Draw only the two guides tied to the movable model origin."""
+        self.PreviewCanvas.delete("ModelProjection")
+        if model_x is None or model_y is None:
+            return
+        canvas_width = int(self.PreviewCanvas.cget("width"))
+        canvas_height = int(self.PreviewCanvas.cget("height"))
+        visible_left = max(0, min(canvas_width, x_lft))
+        visible_right = max(0, min(canvas_width, x_rgt))
+        visible_top = max(0, min(canvas_height, y_top))
+        visible_bottom = max(0, min(canvas_height, y_bot))
+        ruler_top = visible_top-min(22, visible_top)
+        ruler_left = visible_left-min(38, visible_left)
+        tags = ("Ruler", "ModelProjection")
+        if visible_left <= model_x <= visible_right:
+            self.PreviewCanvas.create_line(
+                model_x, model_y, model_x, ruler_top,
+                fill="#d97706", width=2, dash=(6, 3), tags=tags
+            )
+        if visible_top <= model_y <= visible_bottom:
+            self.PreviewCanvas.create_line(
+                model_x, model_y, ruler_left, model_y,
+                fill="#d97706", width=2, dash=(6, 3), tags=tags
+            )
+        self.PreviewCanvas.tag_raise("ModelProjection")
+
+    def _refresh_model_projections(self):
+        """Re-anchor projection endpoints after an incremental jog."""
+        geometry = getattr(self, "preview_machine_geometry", None)
+        if geometry is None:
+            return
+        x_lft, y_top, x_rgt, y_bot = geometry
+        position_x = self.laserX + self.pos_offset[0]/1000.0
+        position_y = self.laserY + self.pos_offset[1]/1000.0
+        model_x, model_y = model_origin_canvas(
+            x_lft, y_top, x_rgt, self.PlotScale, position_x, position_y,
+            home_on_right=bool(self.HomeUR.get()),
+        )
+        self._draw_model_projections(
+            x_lft, y_top, x_rgt, y_bot, model_x, model_y
+        )
 
     def Plot_Data(self, incremental=False):
         self.preview_render_generation += 1
@@ -5865,11 +5905,11 @@ class Application(Frame):
 
         model_position_x = self.laserX + self.pos_offset[0]/1000.0
         model_position_y = self.laserY + self.pos_offset[1]/1000.0
-        if self.HomeUR.get():
-            model_origin_x = x_rgt-model_position_x/self.PlotScale
-        else:
-            model_origin_x = x_lft+model_position_x/self.PlotScale
-        model_origin_y = y_top-model_position_y/self.PlotScale
+        model_origin_x, model_origin_y = model_origin_canvas(
+            x_lft, y_top, x_rgt, self.PlotScale,
+            model_position_x, model_position_y,
+            home_on_right=bool(self.HomeUR.get()),
+        )
         self._draw_machine_rulers(
             x_lft, y_top, x_rgt, y_bot, model_origin_x, model_origin_y
         )

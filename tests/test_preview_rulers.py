@@ -1,6 +1,7 @@
 import unittest
 
-from k40core.preview import rectangular_trace, ruler_step, ruler_values
+from k40core.preview import (model_origin_canvas, rectangular_trace,
+                             ruler_step, ruler_values)
 
 
 class PreviewRulerTests(unittest.TestCase):
@@ -19,6 +20,17 @@ class PreviewRulerTests(unittest.TestCase):
         self.assertEqual(trace[0], [8.0, 7.0, 1])
         self.assertEqual(trace[-1], trace[0])
         self.assertEqual(trace[2], [32.0, -22.0, 1])
+
+    def test_model_origin_tracks_jog_in_both_home_modes(self):
+        self.assertEqual(
+            model_origin_canvas(40, 25, 940, 0.5, 10, -20),
+            (60.0, 65.0),
+        )
+        self.assertEqual(
+            model_origin_canvas(40, 25, 940, 0.5, 10, -20,
+                                home_on_right=True),
+            (920.0, 65.0),
+        )
 
 
 if __name__ == "__main__":
