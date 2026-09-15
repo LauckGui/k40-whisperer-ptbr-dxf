@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "settings": {
+    "Reng_feed": "100",
+    "Reng_passes": "1",
+    "Vcut_feed": "10",
+    "Vcut_passes": "1",
+    "Veng_feed": "20",
+    "Veng_passes": "1",
+    "rast_step": "0.002",
+    "units": "mm"
+  }
+}

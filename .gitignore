@@ -5,6 +5,8 @@ __pycache__/
 build/
 dist/
 k40_whisperer.txt
+k40_whisperer.config.json
+.k40-config-*.tmp
 tools/libredwg/
 tools/libredwg-*.zip
 # Placeholder legado indisponível no OneDrive deste computador.

@@ -127,3 +127,13 @@ determinismo e evita compartilhar estruturas do `ezdxf` entre threads.
 Essa arquitetura também prepara o futuro array procedural: uma instância poderá
 referenciar a mesma geometria-base e aplicar apenas sua transformação, sem gerar
 cópias vetoriais durante importação ou preparação.
+
+## Configuração persistente
+
+As preferências são gravadas atomicamente em `k40_whisperer.config.json`, com
+schema JSON versionado. O arquivo fica ao lado do aplicativo para acompanhar a
+pasta sincronizada entre computadores e é ignorado pelo Git por conter escolhas
+locais. Alterações são consolidadas automaticamente após 500 ms e novamente ao
+fechar. Na primeira execução, o TXT legado é importado e migrado. Um arquivo de
+exemplo versionado documenta o formato, e a opção **Resetar configurações**
+restaura os padrões internos sem apagar trabalhos.

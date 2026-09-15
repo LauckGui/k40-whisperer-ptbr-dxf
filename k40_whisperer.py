@@ -33,6 +33,7 @@ from ecoords import ECoord
 from convex_hull import hull2D
 from embedded_images import K40_Whisperer_Images
 from modern_importers import import_dxf
+from k40core.configuration import ConfigurationError, load_configuration, save_configuration
 from k40core.model import Bounds
 from k40core.preview import iter_preview_polylines, transparent_raster_preview
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
@@ -143,6 +144,7 @@ class Application(Frame):
         self.x = -1
         self.y = -1
         self.createWidgets()
+        self.master.protocol("WM_DELETE_WINDOW", lambda: self.Quit_Click(None))
         self.micro = False
         
 
@@ -426,7 +428,7 @@ class Application(Frame):
         self.include_Veng.set(1)
         self.include_Vcut.set(1)
         self.include_Gcde.set(1)
-        self.include_Time.set(0)
+        self.include_Time.set(1)
         self.advanced.set(0)
         self.run_Reng.set(1)
         self.run_Veng.set(1)
@@ -957,8 +959,8 @@ class Application(Frame):
 
 
         top_File = Menu(self.menuBar, tearoff=0)
-        top_File.add("command", label = "Salvar configurações", command = self.menu_File_Save)
-        top_File.add("command", label = "Ler configurações", command = self.menu_File_Open_Settings_File)
+        top_File.add("command", label = "Salvar configurações agora", command = self.Save_Auto_Configuration)
+        top_File.add("command", label = "Importar configurações legadas", command = self.menu_File_Open_Settings_File)
 
         top_File.add_separator()
         top_File.add("command", label = "Abrir desenho (SVG/DXF/G-code)", command = self.menu_File_Open_Design)
@@ -998,7 +1000,6 @@ class Application(Frame):
         top_View.add_checkbutton(label = "Mostrar corte vetorial", variable=self.include_Vcut ,command= self.menu_View_Refresh)
         top_View.add_checkbutton(label = "Mostrar trajetórias G-code", variable=self.include_Gcde ,command= self.menu_View_Refresh)
         top_View.add_separator()
-        top_View.add_checkbutton(label = "Mostrar tempos estimados", variable=self.include_Time ,command= self.menu_View_Refresh)
         top_View.add_checkbutton(label = "Ajustar zoom ao desenho", variable=self.zoom2image ,command= self.menu_View_Refresh)
 
         #top_View.add_separator()
@@ -1036,6 +1037,8 @@ class Application(Frame):
         top_Settings.add("command", label = "Rotativo <F4>", command = self.ROTARY_Settings_Window)
         top_Settings.add_separator()
         top_Settings.add("command", label = "Trabalho e desenho <F6>", command = self.JOB_Settings_Window)
+        top_Settings.add_separator()
+        top_Settings.add("command", label = "Resetar configurações", command = self.Reset_Configuration)
         
         self.menuBar.add("cascade", label="Configurações", menu=top_Settings)
         
@@ -1050,12 +1053,23 @@ class Application(Frame):
         ##########################################################################
         #                  Config File and command line options                  #
         ##########################################################################
-        config_file = "k40_whisperer.txt"
-        home_config1 = self.HOME_DIR + "/" + config_file
-        if ( os.path.isfile(config_file) ):
-            self.Open_Settings_File(config_file)
-        elif ( os.path.isfile(home_config1) ):
-            self.Open_Settings_File(home_config1)
+        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "k40_whisperer.config.json")
+        self._config_save_after = None
+        self._config_ready = False
+        self._factory_configuration = self._configuration_values()
+        if os.path.isfile(self.config_path):
+            self._load_auto_configuration()
+        else:
+            config_file = "k40_whisperer.txt"
+            home_config1 = self.HOME_DIR + "/" + config_file
+            if os.path.isfile(config_file):
+                self.Open_Settings_File(config_file)
+            elif os.path.isfile(home_config1):
+                self.Open_Settings_File(home_config1)
+            self.include_Time.set(1)
+            self._save_configuration()
+        self._enable_configuration_autosave()
 
 
 #        opts, args = None, None
@@ -1118,6 +1132,93 @@ class Application(Frame):
         return 1
 
 ################################################################################
+    def _configuration_variables(self):
+        names = (
+            "include_Reng", "include_Rpth", "include_Veng", "include_Vcut",
+            "include_Gcde", "advanced", "show_power", "show_test",
+            "halftone", "mirror", "rotate", "negate", "inputCSYS", "HomeUR",
+            "engraveUP", "init_home", "post_home", "post_beep", "post_disp",
+            "post_exec", "pre_pr_crc", "inside_first", "comb_engrave",
+            "comb_vector", "zoom2image", "rotary", "reduced_mem", "wait",
+            "trace_w_laser", "run_Reng", "run_Veng", "run_Vcut", "run_Gcde",
+            "Reng_feed", "Veng_feed", "Vcut_feed", "Reng_power", "Veng_power",
+            "Vcut_power", "Gcode_power", "Trace_power", "max_power",
+            "Reng_passes", "Veng_passes", "Vcut_passes", "Gcde_passes",
+            "rast_step", "ht_size", "jog_step", "board_name", "units",
+            "LaserXsize", "LaserYsize", "LaserXscale", "LaserYscale",
+            "LaserRscale", "rapid_feed", "bezier_M1", "bezier_M2",
+            "bezier_weight", "trace_gap", "trace_speed", "test_time",
+            "test_power", "t_timeout", "n_timeouts", "ink_timeout",
+            "inkscape_path", "batch_path",
+        )
+        return {name: getattr(self, name) for name in names}
+
+    def _configuration_values(self):
+        return {name: variable.get()
+                for name, variable in self._configuration_variables().items()}
+
+    def _apply_configuration(self, settings):
+        variables = self._configuration_variables()
+        for name, value in settings.items():
+            variable = variables.get(name)
+            if variable is not None:
+                variable.set(value)
+        self.include_Time.set(1)
+
+    def _load_auto_configuration(self):
+        try:
+            self._apply_configuration(load_configuration(self.config_path))
+        except (OSError, ValueError, ConfigurationError) as exc:
+            self.statusbar.configure(bg='red')
+            self.statusMessage.set("Configuração inválida; usando padrões: %s" % exc)
+            debug_message(traceback.format_exc())
+
+    def _save_configuration(self, show_status=False):
+        try:
+            save_configuration(self.config_path, self._configuration_values())
+            if show_status:
+                self.statusbar.configure(bg='white')
+                self.statusMessage.set("Configurações salvas: %s" % self.config_path)
+        except Exception as exc:
+            self.statusbar.configure(bg='red')
+            self.statusMessage.set("Não foi possível salvar configurações: %s" % exc)
+            debug_message(traceback.format_exc())
+
+    def _schedule_configuration_save(self, *unused):
+        if not self._config_ready:
+            return
+        if self._config_save_after is not None:
+            try:
+                self.master.after_cancel(self._config_save_after)
+            except Exception:
+                pass
+        self._config_save_after = self.master.after(500, self._autosave_configuration)
+
+    def _autosave_configuration(self):
+        self._config_save_after = None
+        self._save_configuration()
+
+    def _enable_configuration_autosave(self):
+        self._config_ready = True
+        for variable in self._configuration_variables().values():
+            variable.trace_add("write", self._schedule_configuration_save)
+
+    def Save_Auto_Configuration(self):
+        self._save_configuration(show_status=True)
+
+    def Reset_Configuration(self):
+        if not message_ask_ok_cancel(
+                "Resetar configurações",
+                "Restaurar todas as configurações padrão do K40 Whisperer?"):
+            return
+        self._config_ready = False
+        try:
+            self._apply_configuration(self._factory_configuration)
+        finally:
+            self._config_ready = True
+        self._save_configuration(show_status=True)
+        self.menu_View_Refresh()
+
     def Write_Config_File(self, event):
         
         config_data = self.WriteConfig()
@@ -1269,6 +1370,8 @@ class Application(Frame):
 
     def Quit_Click(self, event):
         self.statusMessage.set("Saindo!")
+        if getattr(self, "_config_ready", False):
+            self._save_configuration()
         self.Release_USB
         root.destroy()
 
@@ -1454,8 +1557,6 @@ class Application(Frame):
             return "?" 
 
     def refreshTime(self):
-        if not self.include_Time.get():
-            return
         if self.units.get() == 'in':
             factor =  60.0
         else : 
@@ -2956,7 +3057,7 @@ class Application(Frame):
                     elif "include_Gcde"  in line:
                         self.include_Gcde.set(line[line.find("include_Gcde"):].split()[1])
                     elif "include_Time"  in line:
-                        self.include_Time.set(line[line.find("include_Time"):].split()[1])
+                        self.include_Time.set(1)
                     elif "halftone"  in line:
                         self.halftone.set(line[line.find("halftone"):].split()[1])
                     elif "negate"  in line:
