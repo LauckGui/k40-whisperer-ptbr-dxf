@@ -36,6 +36,18 @@ def ruler_values(span, target_intervals=8):
     return values
 
 
+def rectangular_trace(bounds, gap=0.0, loop=1):
+    """Return a closed rectangular head-preview path around job bounds."""
+    xmin, xmax, ymin, ymax = bounds
+    return [
+        [xmin-gap, ymax+gap, loop],
+        [xmax+gap, ymax+gap, loop],
+        [xmax+gap, ymin-gap, loop],
+        [xmin-gap, ymin-gap, loop],
+        [xmin-gap, ymax+gap, loop],
+    ]
+
+
 def transparent_raster_preview(image, size):
     """Return a black RGBA overlay where white/off pixels are transparent."""
     from PIL import Image, ImageOps

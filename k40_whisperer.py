@@ -37,7 +37,8 @@ from k40core.configuration import ConfigurationError, load_configuration, save_c
 from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Bounds, InstanceArray, Operation
-from k40core.preview import iter_preview_polylines, ruler_values, transparent_raster_preview
+from k40core.preview import (iter_preview_polylines, rectangular_trace,
+                             ruler_values, transparent_raster_preview)
 from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
 from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
@@ -206,6 +207,9 @@ class Application(Frame):
                                    outline=color, width=width)
             draw.rounded_rectangle((p(9),p(9),p(21),p(21)), radius=p(1),
                                    fill="white", outline=color, width=width)
+        elif name == "preview":
+            draw.rectangle((p(3),p(5),p(21),p(19)), outline=color, width=width)
+            draw.polygon(((p(10),p(8)),(p(17),p(12)),(p(10),p(16))), fill=color)
         elif name == "home":
             draw.polygon(((p(2),p(11)),(p(12),p(2)),(p(22),p(11))), fill=color)
             draw.rectangle((p(5),p(10),p(19),p(21)), fill=color)
@@ -243,6 +247,7 @@ class Application(Frame):
         self.initComplete = 0
         self.stop=[True]
         self.job_paused = False
+        self.job_running = False
         self.connection_state = "no_board"
         
         self.k40        = None
@@ -433,6 +438,7 @@ class Application(Frame):
         self.trace_w_laser  = BooleanVar()
         self.trace_gap      = StringVar()
         self.trace_speed    = StringVar()
+        self.preview_mode   = StringVar()
         
         ###########################################################################
         #                         INITILIZE VARIABLES                             #
@@ -561,6 +567,7 @@ class Application(Frame):
         self.trace_w_laser.set(0)
         self.trace_gap.set(0)
         self.trace_speed.set(50)
+        self.preview_mode.set("rectangle")
         
         self.laserX    = 0.0
         self.laserY    = 0.0
@@ -767,6 +774,12 @@ class Application(Frame):
         self.Run_Button        = Button(self.master,text="Rodar", bg="#5cb85c", activebackground="#449d44", command=self.Run_Selected)
         self.Pause_Button      = Button(self.master,text="Pausar", bg="#f0ad4e", activebackground="#ec971f", command=self.Pause_Job)
         self.Stop_Button       = Button(self.master,text="Parar", bg="#d9534f", activebackground="#c9302c", command=self.Stop_Job)
+        self.Preview_Button    = Button(self.master, text="Preview", bg="#337ab7",
+                                        activebackground="#286090",
+                                        command=self.Run_Boundary_Preview)
+        self.Preview_Menu_Button = Button(self.master, text="▼", bg="#337ab7",
+                                           activebackground="#286090",
+                                           command=self.Show_Preview_Mode_Menu)
 
         try:            
             self.left_image  = PhotoImage(data=K40_Whisperer_Images.left_B64,  format='gif')
@@ -825,6 +838,7 @@ class Application(Frame):
             "folder": self.make_ui_icon("folder", 20),
             "reload": self.make_ui_icon("reload", 20),
             "copies": self.make_ui_icon("copies", 20),
+            "preview": self.make_ui_icon("preview", 18, "white"),
             "home": self.make_ui_icon("home", 20),
             "unlock": self.make_ui_icon("unlock", 20),
             "target": self.make_ui_icon("target", 20),
@@ -852,10 +866,14 @@ class Application(Frame):
         self.Run_Button.configure(image=self.ui_icons["play"], compound=LEFT, fg="white")
         self.Pause_Button.configure(image=self.ui_icons["pause"], compound=LEFT)
         self.Stop_Button.configure(image=self.ui_icons["stop"], compound=LEFT, fg="white")
+        self.Preview_Button.configure(image=self.ui_icons["preview"], compound=LEFT,
+                                      fg="white", padx=2)
+        self.Preview_Menu_Button.configure(fg="white", padx=0)
         for button in (self.Initialize_Button, self.Open_Button, self.Reload_Button,
                        self.Array_Button,
                        self.Home_Button, self.UnLock_Button, self.GoTo_Button,
-                       self.Run_Button, self.Pause_Button, self.Stop_Button):
+                       self.Run_Button, self.Pause_Button, self.Stop_Button,
+                       self.Preview_Button):
             button.configure(padx=7, pady=2)
         self.GoTo_Button.configure(padx=2)
         
@@ -1169,7 +1187,7 @@ class Application(Frame):
             "LaserRscale", "rapid_feed", "bezier_M1", "bezier_M2",
             "bezier_weight", "trace_gap", "trace_speed", "test_time",
             "test_power", "t_timeout", "n_timeouts", "ink_timeout",
-            "inkscape_path", "batch_path",
+            "inkscape_path", "batch_path", "preview_mode",
         )
         return {name: getattr(self, name) for name in names}
 
@@ -3605,6 +3623,40 @@ class Application(Frame):
             if DEBUG:
                 debug_message(traceback.format_exc())
 
+    def _sync_run_pause_button(self):
+        if self.job_running:
+            self.Pause_Button.lift()
+        else:
+            self.Run_Button.lift()
+
+    def _set_preview_mode(self, mode):
+        if mode not in ("rectangle", "contour"):
+            return
+        self.preview_mode.set(mode)
+        label = "Retangular" if mode == "rectangle" else "Contorno"
+        self.statusbar.configure(bg='white')
+        self.statusMessage.set("Modo do preview: %s." % label)
+
+    def Show_Preview_Mode_Menu(self):
+        menu = Menu(self.master, tearoff=0)
+        menu.add_radiobutton(label="Retangular", variable=self.preview_mode,
+                             value="rectangle",
+                             command=lambda: self._set_preview_mode("rectangle"))
+        menu.add_radiobutton(label="Contorno", variable=self.preview_mode,
+                             value="contour",
+                             command=lambda: self._set_preview_mode("contour"))
+        x = self.Preview_Menu_Button.winfo_rootx()
+        y = self.Preview_Menu_Button.winfo_rooty() + self.Preview_Menu_Button.winfo_height()
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
+    def Run_Boundary_Preview(self):
+        if self.GUI_Disabled:
+            return
+        self.Trace_Eng(trace_mode=self.preview_mode.get())
+
     def Run_Selected(self):
         """Executa, em ordem segura, apenas os processos marcados na tabela."""
         if self.GUI_Disabled:
@@ -3720,9 +3772,9 @@ class Application(Frame):
             self.statusMessage.set("Não há dados vetoriais para gravar")
         self.Finish_Job()
 
-    def Trace_Eng(self, output_filename=None):
+    def Trace_Eng(self, output_filename=None, trace_mode="contour"):
         self.Prepare_for_laser_run("Boundary Trace: Processing Data.")
-        self.trace_coords = self.make_trace_path()
+        self.trace_coords = self.make_trace_path(trace_mode)
 
         if self.trace_coords!=[]:
             self.send_data("Trace_Eng", output_filename)
@@ -3815,7 +3867,9 @@ class Application(Frame):
     def Prepare_for_laser_run(self,msg):
         self.stop[0]=False
         self.job_paused=False
+        self.job_running=True
         self.Pause_Button.configure(text="Pausar", image=self.ui_icons["pause"], bg="#f0ad4e")
+        self._sync_run_pause_button()
         self.move_head_window_temporary([0,0])
         self.set_gui("disabled")
         self.statusbar.configure( bg = 'green' )
@@ -3826,7 +3880,9 @@ class Application(Frame):
         self.set_gui("normal")
         self.stop[0]=True
         self.job_paused=False
+        self.job_running=False
         self.Pause_Button.configure(text="Pausar", image=self.ui_icons["pause"], bg="#f0ad4e")
+        self._sync_run_pause_button()
         if self.post_home.get():
             self.Unlock()
 
@@ -3855,7 +3911,7 @@ class Application(Frame):
             message_box(msg1, msg2)
 
 
-    def make_trace_path(self):
+    def make_trace_path(self, mode="contour"):
         my_hull = hull2D()
         if self.inputCSYS.get() and self.RengData.image == None:
             xmin,xmax,ymin,ymax = 0.0,0.0,0.0,0.0
@@ -3864,6 +3920,16 @@ class Application(Frame):
             
         startx = xmin
         starty = ymax
+
+        if mode == "rectangle":
+            if xmax <= xmin or ymax <= ymin:
+                return []
+            gap = float(self.trace_gap.get())/self.units_scale
+            trace_coords = rectangular_trace((xmin, xmax, ymin, ymax), gap)
+            trace_coords, startx, starty = self.scale_vector_coords(
+                trace_coords, startx, starty
+            )
+            return trace_coords
 
         #######################################
         Vcut_coords = self.VcutData.ecoords
@@ -5177,9 +5243,12 @@ class Application(Frame):
                 #From Bottom up
                 BUinit = self.h-70
                 Yloc = BUinit
-                self.Run_Button.place   (x=12,  y=Yloc, width=105, height=standard_button_h)
+                self.Preview_Button.place(x=12, y=Yloc, width=82, height=standard_button_h)
+                self.Preview_Menu_Button.place(x=94, y=Yloc, width=23, height=standard_button_h)
+                self.Run_Button.place   (x=121, y=Yloc, width=105, height=standard_button_h)
                 self.Pause_Button.place (x=121, y=Yloc, width=105, height=standard_button_h)
                 self.Stop_Button.place  (x=230, y=Yloc, width=112, height=standard_button_h)
+                self._sync_run_pause_button()
                 Yloc=Yloc-10+10
 
                 # A coluna avançada precisa de mais espaço para os textos PT-BR.
@@ -5661,8 +5730,9 @@ class Application(Frame):
     ##########################################
     #        CANVAS PLOTTING STUFF           #
     ##########################################
-    def _draw_machine_rulers(self, x_lft, y_top, x_rgt, y_bot):
-        """Draw machine-unit rulers and the X=0/Y=0 reference axes."""
+    def _draw_machine_rulers(self, x_lft, y_top, x_rgt, y_bot,
+                             model_x=None, model_y=None):
+        """Draw rulers, machine axes, and the model-origin projections."""
         width = float(self.LaserXsize.get())
         height = float(self.LaserYsize.get())
         canvas_width = int(self.PreviewCanvas.cget("width"))
@@ -5718,6 +5788,17 @@ class Application(Frame):
             ruler_left, y_top, x_rgt, y_top, fill="#1480a8", width=2,
             tags="Ruler"
         )
+        if model_x is not None and model_y is not None:
+            if visible_left <= model_x <= visible_right:
+                self.PreviewCanvas.create_line(
+                    model_x, model_y, model_x, ruler_top,
+                    fill="#d97706", width=2, dash=(6, 3), tags="Ruler"
+                )
+            if visible_top <= model_y <= visible_bottom:
+                self.PreviewCanvas.create_line(
+                    model_x, model_y, ruler_left, model_y,
+                    fill="#d97706", width=2, dash=(6, 3), tags="Ruler"
+                )
 
     def Plot_Data(self, incremental=False):
         self.preview_render_generation += 1
@@ -5782,7 +5863,16 @@ class Application(Frame):
             self.segID.append( self.PreviewCanvas.create_rectangle(
                             x_lft, y_bot, x_rgt, y_top, fill="gray80", outline="#7f8790", width=1) )
 
-        self._draw_machine_rulers(x_lft, y_top, x_rgt, y_bot)
+        model_position_x = self.laserX + self.pos_offset[0]/1000.0
+        model_position_y = self.laserY + self.pos_offset[1]/1000.0
+        if self.HomeUR.get():
+            model_origin_x = x_rgt-model_position_x/self.PlotScale
+        else:
+            model_origin_x = x_lft+model_position_x/self.PlotScale
+        model_origin_y = y_top-model_position_y/self.PlotScale
+        self._draw_machine_rulers(
+            x_lft, y_top, x_rgt, y_bot, model_origin_x, model_origin_y
+        )
 
 
         ######################################

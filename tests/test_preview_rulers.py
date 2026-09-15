@@ -1,6 +1,6 @@
 import unittest
 
-from k40core.preview import ruler_step, ruler_values
+from k40core.preview import rectangular_trace, ruler_step, ruler_values
 
 
 class PreviewRulerTests(unittest.TestCase):
@@ -13,6 +13,12 @@ class PreviewRulerTests(unittest.TestCase):
 
     def test_zero_span_is_safe(self):
         self.assertEqual(ruler_values(0), [0.0])
+
+    def test_rectangular_trace_is_closed_and_applies_gap(self):
+        trace = rectangular_trace((10.0, 30.0, -20.0, 5.0), gap=2.0)
+        self.assertEqual(trace[0], [8.0, 7.0, 1])
+        self.assertEqual(trace[-1], trace[0])
+        self.assertEqual(trace[2], [32.0, -22.0, 1])
 
 
 if __name__ == "__main__":
