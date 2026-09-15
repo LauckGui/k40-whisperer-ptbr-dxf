@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 from k40core.importing import ImportCancelled, check_cancelled, report_progress
+from k40core.topology import compose_vector_objects
 
 from k40core.model import (
     Color,
@@ -398,6 +399,44 @@ def import_dxf_document(
         points = None
         segments = None
         del entity
+
+    source_object_count = len(result.vectors)
+    source_segment_count = sum(
+        len(path.segments) for vector in result.vectors for path in vector.paths
+    )
+    if result.vectors:
+        check_cancelled(cancelled)
+        report_progress(
+            progress, "optimizing", message="Compondo contornos e simplificando caminhos..."
+        )
+        source_vectors = result.vectors
+        result.vectors = compose_vector_objects(
+            source_vectors,
+            tolerance_mm=tolerance_mm,
+            simplify_tolerance_mm=tolerance_mm,
+        )
+        optimized_segment_count = sum(
+            len(path.segments) for vector in result.vectors for path in vector.paths
+        )
+        result.issues.append(ImportIssue(
+            code="dxf.topology_composed",
+            message=(
+                "%d objetos e %d segmentos foram compostos em %d objetos, "
+                "%d caminhos e %d segmentos."
+                % (source_object_count, source_segment_count, len(result.vectors),
+                   sum(len(vector.paths) for vector in result.vectors),
+                   optimized_segment_count)
+            ),
+            severity=IssueSeverity.INFO,
+            details={
+                "source_objects": source_object_count,
+                "source_segments": source_segment_count,
+                "result_objects": len(result.vectors),
+                "result_paths": sum(len(vector.paths) for vector in result.vectors),
+                "result_segments": optimized_segment_count,
+                "tolerance_mm": tolerance_mm,
+            },
+        ))
 
     for entity_type, count in sorted(skipped.items()):
         result.issues.append(

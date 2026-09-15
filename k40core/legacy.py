@@ -12,6 +12,7 @@ def vector_lines_in_inches(document: JobDocument, operation: Operation) -> list[
     for vector in document.vectors:
         if vector.operation is not operation or not vector.style.visible or vector.layer_id not in visible_layers:
             continue
+        already_composed = bool(vector.metadata.get("topology_composed"))
         key = (vector.layer_id, vector.style.stroke)
         target = grouped_segments.setdefault(key, [])
         for path in vector.paths:
@@ -20,7 +21,11 @@ def vector_lines_in_inches(document: JobDocument, operation: Operation) -> list[
                     raise TypeError("O adaptador legado requer segmentos previamente achatados.")
                 start = vector.transform.apply(segment.start)
                 end = vector.transform.apply(segment.end)
-                target.append(LineSegment(start, end))
+                if already_composed:
+                    lines.append([start.x / 25.4, start.y / 25.4,
+                                  end.x / 25.4, end.y / 25.4])
+                else:
+                    target.append(LineSegment(start, end))
 
     for segments in grouped_segments.values():
         for path in stitch_line_segments(segments):

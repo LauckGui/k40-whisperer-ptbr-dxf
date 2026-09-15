@@ -262,6 +262,25 @@ class DxfImporterTests(unittest.TestCase):
         self.assertEqual(document.fills[0].source.entity_type, "SOLID")
         self.assertEqual(document.fills[0].operation, Operation.RASTER_ENGRAVE)
 
+    def test_exploded_lines_are_composed_into_a_closed_simplified_path(self):
+        path = self._path()
+        drawing = ezdxf.new("R2010")
+        drawing.units = ezdxf.units.MM
+        modelspace = drawing.modelspace()
+        for start, end in (
+            ((10, 10), (10, 0)), ((0, 0), (5, 0)), ((5, 0), (10, 0)),
+            ((0, 10), (0, 0)), ((10, 10), (0, 10)),
+        ):
+            modelspace.add_line(start, end, dxfattribs={"color": 1})
+        drawing.saveas(path)
+
+        document = import_dxf_document(path)
+
+        self.assertEqual(len(document.vectors), 1)
+        self.assertEqual(len(document.vectors[0].paths), 1)
+        self.assertTrue(document.vectors[0].paths[0].closed)
+        self.assertEqual(len(document.vectors[0].paths[0].segments), 4)
+
     def test_hatch_with_hole_rasterizes_without_inkscape(self):
         path = self._path()
         drawing = ezdxf.new("R2010")

@@ -23,6 +23,6 @@ from .model import (
     VectorStyle,
 )
 from .rasterizer import RasterizationError, rasterize_fills
-from .topology import stitch_line_segments
+from .topology import compose_vector_objects, simplify_vector_path, stitch_line_segments
 
 __all__ = [name for name in globals() if not name.startswith("_")]

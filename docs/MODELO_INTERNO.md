@@ -66,6 +66,17 @@ tolerância numérica de exportação, pode inverter segmentos e identifica
 caminhos fechados. Camada, cor e operação delimitam os grupos que podem ser
 unidos, evitando conectar processos diferentes.
 
+O DXF agora executa essa composição ainda na thread de importação. Objetos com
+camada, operação, cor, espessura e visibilidade compatíveis tornam-se um objeto
+com múltiplos caminhos. Em seguida, Ramer–Douglas–Peucker remove pontos
+redundantes dentro da mesma tolerância usada para achatar as curvas. Contornos
+fechados permanecem fechados, extremidades abertas são preservadas e os handles
+de origem ficam registrados no objeto composto. O adaptador legado reconhece o
+resultado e não repete a análise topológica.
+
+No arquivo real `teste_Chaveiro.dxf`, a etapa reduziu 13.736 objetos e 1.047.472
+segmentos para 3 objetos, 3.498 caminhos e 108.608 segmentos.
+
 ## Compatibilidade legada
 
 `k40core.legacy.vector_lines_in_inches` converte vetores achatados para a lista
