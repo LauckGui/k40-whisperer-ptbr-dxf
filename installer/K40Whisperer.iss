@@ -2,6 +2,12 @@
 #define AppVersion "0.71.0"
 #define AppPublisher "K40 Whisperer"
 #define AppExeName "K40 Whisperer.exe"
+#ifndef AppSource
+#define AppSource "..\release\K40 Whisperer"
+#endif
+#ifndef InstallerOutputDir
+#define InstallerOutputDir "..\dist\installer"
+#endif
 
 [Setup]
 AppId={{8DCE73AD-1EB6-4EE8-9B59-3B6921E01227}
@@ -12,7 +18,7 @@ DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 PrivilegesRequired=lowest
-OutputDir=..\dist\installer
+OutputDir={#InstallerOutputDir}
 OutputBaseFilename=K40-Whisperer-Setup-{#AppVersion}-x64
 SetupIconFile=..\scorchworks.ico
 UninstallDisplayIcon={app}\{#AppExeName}
@@ -30,7 +36,7 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Name: "desktopicon"; Description: "Criar um atalho na área de trabalho"; GroupDescription: "Atalhos adicionais:"; Flags: unchecked
 
 [Files]
-Source: "..\release\K40 Whisperer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"

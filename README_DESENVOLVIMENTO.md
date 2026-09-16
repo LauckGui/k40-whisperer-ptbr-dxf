@@ -47,10 +47,12 @@ desinstalador.
 1. Instale o Inno Setup 6 uma vez no computador de desenvolvimento:
    `winget install --id JRSoftware.InnoSetup -e`
 2. Execute `Construir_Instalador.bat`.
-3. O resultado será criado em `dist\installer`.
+3. O resultado será criado na pasta `Output`, ao lado do repositório.
 
 O script instala a versão fixada do PyInstaller no ambiente virtual local,
 executa todos os testes e interrompe o build se qualquer teste falhar.
+Os arquivos intermediários são produzidos na pasta temporária do Windows para
+evitar bloqueios de sincronização quando o projeto estiver dentro do OneDrive.
 
 O instalador empacota a aplicação, mas não altera o driver USB da controladora.
 O computador de destino ainda precisa ter um driver libUSB compatível com a
