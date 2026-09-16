@@ -2484,10 +2484,19 @@ class Application(Frame):
             return
         dialog = Toplevel(self.master)
         dialog.title("Alinhar imagem")
-        usable_height = max(520, dialog.winfo_screenheight()-120)
-        dialog.geometry("940x%d" % min(700, usable_height))
+        # Reserve desktop chrome and the dialog footer.  A native "zoomed"
+        # window can exceed the usable desktop on some Windows setups, hiding
+        # the Apply/Cancel row below the screen edge.
+        screen_width = dialog.winfo_screenwidth()
+        screen_height = dialog.winfo_screenheight()
+        usable_width = max(760, screen_width-60)
+        usable_height = max(520, screen_height-120)
+        dialog_width = min(1400, usable_width)
+        dialog_height = min(900, usable_height)
+        dialog.geometry("%dx%d+%d+%d" % (
+            dialog_width, dialog_height,
+            max(0, (screen_width-dialog_width)//2), max(0, (screen_height-dialog_height)//2)))
         dialog.minsize(760, 520)
-        dialog.state("zoomed")
         dialog.transient(self.master)
         dialog.grab_set()
 
