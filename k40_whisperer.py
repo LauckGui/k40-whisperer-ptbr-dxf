@@ -2523,6 +2523,8 @@ class Application(Frame):
                 )
             return self.Get_Design_Bounds()
 
+        footer = Frame(dialog, padx=10, pady=8)
+        footer.pack(side=BOTTOM, fill=X)
         root_frame = Frame(dialog, padx=10, pady=10)
         root_frame.pack(fill=BOTH, expand=True)
         controls = Frame(root_frame, width=225)
@@ -2541,8 +2543,6 @@ class Application(Frame):
         raster_box.pack(fill=X, pady=(0, 7))
         mask_box = LabelFrame(controls, text=" Máscara por vetor ", padx=8, pady=7)
         mask_box.pack(fill=X, pady=(0, 7))
-        footer = Frame(controls)
-        footer.pack(fill=X, side=BOTTOM)
 
         def adjust(variable, amount):
             try:
@@ -2682,6 +2682,13 @@ class Application(Frame):
         raster_row(2, "Gama", self.raster_gamma, .1, 3.0, .1)
         Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
             row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
+        Label(raster_box, text="Algoritmo", anchor=W).grid(row=4, column=0, sticky=W, pady=(5, 0))
+        OptionMenu(raster_box, self.raster_dither_method, "Limiar", "Halftone",
+                   "Floyd–Steinberg", "Atkinson", "Jarvis–Judice–Ninke", "Bayer 8×8").grid(
+            row=4, column=1, columnspan=4, sticky=EW, pady=(5, 0))
+        preview_dither = [False]
+        Button(raster_box, text="Atualizar prévia", command=lambda: (preview_dither.__setitem__(0, True), draw_preview())).grid(
+            row=5, column=0, columnspan=5, sticky=EW, pady=(4, 0))
 
         mask_status = StringVar(value="Nenhuma borda selecionada")
         Label(mask_box, textvariable=mask_status, anchor=W, fg="#4b5563").pack(fill=X)
@@ -2745,7 +2752,10 @@ class Application(Frame):
                     image, brightness=self.raster_brightness.get(),
                     contrast=self.raster_contrast.get(), gamma=self.raster_gamma.get(),
                     invert=bool(self.negate.get()),
-                ).convert("RGBA").resize(target_size, Image.LANCZOS)
+                )
+                if preview_dither[0] and self.raster_dither_method.get() != "Halftone":
+                    shown = dither_image(shown, self.raster_dither_method.get())
+                shown = shown.convert("RGBA").resize(target_size, Image.LANCZOS)
             except Exception:
                 shown = image.resize(target_size, Image.LANCZOS)
             preview_photo[0] = ImageTk.PhotoImage(shown)
