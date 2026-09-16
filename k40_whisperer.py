@@ -2732,19 +2732,19 @@ class Application(Frame):
                   showvalue=0, variable=variable, resolution=increment,
                   length=105).grid(row=row_index, column=4, sticky=EW)
 
-        raster_row(0, "Brilho", self.raster_brightness, -100, 100, 1)
-        raster_row(1, "Contraste", self.raster_contrast, .1, 3.0, .1)
-        raster_row(2, "Gama", self.raster_gamma, .1, 3.0, .1)
-        Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
-            row=3, column=0, columnspan=3, sticky=W, pady=(4, 0))
-        Button(raster_box, text="Redefinir", command=reset_raster_treatment).grid(
-            row=3, column=3, columnspan=2, sticky=EW, pady=(4, 0))
-        Label(raster_box, text="Algoritmo", anchor=W).grid(row=4, column=0, sticky=W, pady=(5, 0))
+        Label(raster_box, text="Algoritmo", anchor=W).grid(row=0, column=0, sticky=W, pady=(0, 3))
         algorithm_selector = ttk.Combobox(
             raster_box, textvariable=self.raster_dither_method, state="readonly",
             values=("Limiar", "Halftone", "Floyd–Steinberg", "Atkinson",
                     "Jarvis–Judice–Ninke", "Bayer 8×8"), width=22)
-        algorithm_selector.grid(row=4, column=1, columnspan=4, sticky=EW, pady=(5, 0))
+        algorithm_selector.grid(row=0, column=1, columnspan=4, sticky=EW, pady=(0, 3))
+        raster_row(1, "Brilho", self.raster_brightness, -100, 100, 1)
+        raster_row(2, "Contraste", self.raster_contrast, .1, 3.0, .1)
+        raster_row(3, "Gama", self.raster_gamma, .1, 3.0, .1)
+        Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
+            row=4, column=0, columnspan=3, sticky=W, pady=(4, 0))
+        Button(raster_box, text="Redefinir Ajustes", command=reset_raster_treatment).grid(
+            row=4, column=3, columnspan=2, sticky=EW, pady=(4, 0))
         preview_dither = [False]
 
         algorithm_help = {
@@ -3039,7 +3039,7 @@ class Application(Frame):
             mask_status.set("Nenhuma borda selecionada")
             draw_preview()
         Button(mask_box, text="Selecionar borda", command=select_mask).pack(side=LEFT, pady=(5, 0))
-        Button(mask_box, text="Remover máscara", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
+        Button(mask_box, text="Redefinir máscara", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
         Button(footer, text="Aplicar", command=apply_image).pack(side=LEFT, padx=(0, 6))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=LEFT)
         trace_variable(width_mm, sync_from_width)
