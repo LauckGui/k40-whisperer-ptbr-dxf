@@ -45,6 +45,8 @@ from k40core.preview import (iter_preview_polylines, model_origin_canvas,
                              rectangular_trace, ruler_values,
                              transparent_raster_preview)
 from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
+from k40core.raster_processing import (color_intensities_from_document,
+                                        prepare_grayscale)
 from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
@@ -372,6 +374,7 @@ class Application(Frame):
         self.show_test    = BooleanVar()
         
         self.halftone     = BooleanVar()
+        self.raster_dxf_color_levels = BooleanVar()
         self.mirror       = BooleanVar()
         self.rotate       = BooleanVar()
         self.negate       = BooleanVar()
@@ -392,6 +395,9 @@ class Application(Frame):
         
 
         self.ht_size    = StringVar()
+        self.raster_brightness = StringVar()
+        self.raster_contrast = StringVar()
+        self.raster_gamma = StringVar()
         self.Reng_feed  = StringVar()
         self.Veng_feed  = StringVar()
         self.Vcut_feed  = StringVar()
@@ -486,6 +492,7 @@ class Application(Frame):
         self.show_test.set(1)
         
         self.halftone.set(1)
+        self.raster_dxf_color_levels.set(0)
         self.mirror.set(0)
         self.rotate.set(0)
         self.negate.set(0)
@@ -505,6 +512,9 @@ class Application(Frame):
         self.wait.set(1)
         
         self.ht_size.set(500)
+        self.raster_brightness.set("0")
+        self.raster_contrast.set("1.0")
+        self.raster_gamma.set("1.0")
 
         self.Reng_feed.set("100")
         self.Veng_feed.set("20")
@@ -1209,7 +1219,7 @@ class Application(Frame):
         names = (
             "include_Reng", "include_Rpth", "include_Veng", "include_Vcut",
             "include_Gcde", "advanced", "show_power", "show_test",
-            "halftone", "mirror", "rotate", "negate", "inputCSYS", "HomeUR",
+            "halftone", "raster_dxf_color_levels", "mirror", "rotate", "negate", "inputCSYS", "HomeUR",
             "engraveUP", "init_home", "post_home", "post_beep", "post_disp",
             "post_exec", "pre_pr_crc", "inside_first", "comb_engrave",
             "comb_vector", "zoom2image", "rotary", "reduced_mem", "wait",
@@ -1217,7 +1227,8 @@ class Application(Frame):
             "Reng_feed", "Veng_feed", "Vcut_feed", "Reng_power", "Veng_power",
             "Vcut_power", "Gcode_power", "Trace_power", "max_power",
             "Reng_passes", "Veng_passes", "Vcut_passes", "Gcde_passes",
-            "rast_step", "ht_size", "jog_step", "board_name", "units",
+            "rast_step", "ht_size", "raster_brightness", "raster_contrast",
+            "raster_gamma", "jog_step", "board_name", "units",
             "LaserXsize", "LaserYsize", "LaserXscale", "LaserYscale",
             "LaserRscale", "rapid_feed", "bezier_M1", "bezier_M2",
             "bezier_weight", "trace_gap", "trace_speed", "test_time",
@@ -2688,7 +2699,13 @@ class Application(Frame):
             if (self.RengData.image != None and self.RengData.ecoords==[]):
                 ecoords=[]
                 cutoff=128
-                image_temp = self.RengData.image.convert("L")
+                image_temp = prepare_grayscale(
+                    self.RengData.image,
+                    brightness=self.raster_brightness.get(),
+                    contrast=self.raster_contrast.get(),
+                    gamma=self.raster_gamma.get(),
+                    invert=bool(self.negate.get()),
+                )
 ##                if self.unsharp_flag.get():
 ##                    from PIL import ImageFilter       
 ##                    #image_temp = image_temp.filter(UnsharpMask(radius=self.unsharp_r, percent=self.unsharp_p, threshold=self.unsharp_t))
@@ -2698,9 +2715,6 @@ class Application(Frame):
 ##                    filter.threshold = int(float(self.unsharp_t.get())) # Threshold 0
 ##                    image_temp = image_temp.filter(filter)
 
-                if self.negate.get():
-                    image_temp = ImageOps.invert(image_temp)
-                    
                 if self.mirror.get():
                     image_temp = ImageOps.mirror(image_temp)
 
@@ -2793,9 +2807,13 @@ class Application(Frame):
             if self.RengData.image is None:
                 raise ValueError("Não há preenchimento raster para calcular.")
 
-            image_temp = self.RengData.image.convert("L")
-            if self.raster_time_options["negate"]:
-                image_temp = ImageOps.invert(image_temp)
+            image_temp = prepare_grayscale(
+                self.RengData.image,
+                brightness=self.raster_time_options["brightness"],
+                contrast=self.raster_time_options["contrast"],
+                gamma=self.raster_time_options["gamma"],
+                invert=self.raster_time_options["negate"],
+            )
             if self.raster_time_options["mirror"]:
                 image_temp = ImageOps.mirror(image_temp)
             if self.raster_time_options["rotate"]:
@@ -3038,6 +3056,7 @@ class Application(Frame):
         # SVG. The configured raster step selects scanlines later and remains
         # independent from the number of passes.
         raster_dpi = 500.0 if self.reduced_mem.get() else 1000.0
+        raster_color_levels = bool(self.raster_dxf_color_levels.get())
 
         def request_from_ui(kind):
             request = {"kind": kind, "event": threading.Event(), "value": None}
@@ -3058,6 +3077,7 @@ class Application(Frame):
                     unit_resolver=lambda: request_from_ui("units"),
                     projection_resolver=lambda: request_from_ui("projection"),
                     raster_dpi=raster_dpi,
+                    raster_color_levels=raster_color_levels,
                 )
                 # ECoord is independent from Tk, so the potentially expensive
                 # legacy conversion belongs in the worker too.
@@ -4931,6 +4951,18 @@ class Application(Frame):
         self.RengData.reset_path()
         self.refreshTime()
 
+    def Refresh_DXF_Color_Levels(self):
+        """Re-render DXF solid fills after toggling color-based intensity."""
+        document = self.job_document
+        if (document is None or not document.fills or self.array_build_thread is not None):
+            self.Reset_RasterPath_and_Update_Time()
+            return
+        self._rebuild_array_legacy_data(
+            progress_message="Atualizando intensidades dos preenchimentos DXF...",
+            success_message="Intensidades por cor do DXF atualizadas.",
+            failure_message="Falha ao atualizar intensidades do DXF",
+        )
+
     def View_Refresh_and_Reset_RasterPath(self, varName=0, index=0, mode=0):
         self.RengData.reset_path()
         self.SCALE = 0
@@ -5048,6 +5080,9 @@ class Application(Frame):
             yscale *= float(self.LaserRscale.get())
         self.raster_time_options = {
             "negate": bool(self.negate.get()),
+            "brightness": float(self.raster_brightness.get()),
+            "contrast": float(self.raster_contrast.get()),
+            "gamma": float(self.raster_gamma.get()),
             "mirror": bool(self.mirror.get()),
             "rotate": bool(self.rotate.get()),
             "xscale": float(self.LaserXscale.get()),
@@ -6868,7 +6903,11 @@ class Application(Frame):
                         document.bounds, requested_raster_dpi, 50_000_000
                     )
                     raster_image = rasterize_fills(
-                        document, raster_dpi, maximum_pixels=50_000_000
+                        document, raster_dpi, maximum_pixels=50_000_000,
+                        color_intensities=(
+                            color_intensities_from_document(document)
+                            if self.raster_dxf_color_levels.get() else None
+                        ),
                     )
                 else:
                     raster_image = None
@@ -7309,7 +7348,7 @@ class Application(Frame):
     ################################################################################
     def RASTER_Settings_Window(self):
         Wset=425+280
-        Hset=330 #260
+        Hset=410
         raster_settings = Toplevel(width=Wset, height=Hset)
         raster_settings.grab_set() # Use grab_set to prevent user input in the main window
         raster_settings.focus_set()
@@ -7358,6 +7397,41 @@ class Application(Frame):
         self.Checkbutton_Negate = Checkbutton(raster_settings,text=" ", anchor=W)
         self.Checkbutton_Negate.place(x=w_label+22, y=D_Yloc, width=75, height=23)
         self.Checkbutton_Negate.configure(variable=self.negate)
+
+        D_Yloc=D_Yloc+D_dY
+        self.Label_DXF_Color_Levels = Label(
+            raster_settings, text="Usar cor do DXF como nível", anchor=CENTER
+        )
+        self.Label_DXF_Color_Levels.place(x=xd_label_L, y=D_Yloc, width=w_label, height=21)
+        self.Checkbutton_DXF_Color_Levels = Checkbutton(
+            raster_settings, text="", anchor=W,
+            variable=self.raster_dxf_color_levels,
+            command=self.Refresh_DXF_Color_Levels,
+        )
+        self.Checkbutton_DXF_Color_Levels.place(x=w_label+22, y=D_Yloc, width=75, height=23)
+
+        # O bitmap composto pelo SVG é tratado aqui antes de virar pontos de
+        # dithering. Os controles não mudam dimensões ou alinhamento da arte.
+        D_Yloc=D_Yloc+D_dY
+        self.Label_Raster_Brightness = Label(raster_settings, text="Brilho (-100 a 100)", anchor=CENTER)
+        self.Label_Raster_Brightness.place(x=xd_label_L, y=D_Yloc, width=w_label, height=21)
+        self.Entry_Raster_Brightness = Entry(raster_settings, width="15")
+        self.Entry_Raster_Brightness.place(x=xd_entry_L, y=D_Yloc, width=w_entry, height=23)
+        self.Entry_Raster_Brightness.configure(textvariable=self.raster_brightness)
+
+        D_Yloc=D_Yloc+D_dY
+        self.Label_Raster_Contrast = Label(raster_settings, text="Contraste", anchor=CENTER)
+        self.Label_Raster_Contrast.place(x=xd_label_L, y=D_Yloc, width=w_label, height=21)
+        self.Entry_Raster_Contrast = Entry(raster_settings, width="15")
+        self.Entry_Raster_Contrast.place(x=xd_entry_L, y=D_Yloc, width=w_entry, height=23)
+        self.Entry_Raster_Contrast.configure(textvariable=self.raster_contrast)
+
+        D_Yloc=D_Yloc+D_dY
+        self.Label_Raster_Gamma = Label(raster_settings, text="Gamma", anchor=CENTER)
+        self.Label_Raster_Gamma.place(x=xd_label_L, y=D_Yloc, width=w_label, height=21)
+        self.Entry_Raster_Gamma = Entry(raster_settings, width="15")
+        self.Entry_Raster_Gamma.place(x=xd_entry_L, y=D_Yloc, width=w_entry, height=23)
+        self.Entry_Raster_Gamma.configure(textvariable=self.raster_gamma)
 
         ############
         D_Yloc=D_Yloc+D_dY 
@@ -7493,6 +7567,8 @@ class Application(Frame):
 
         self.bezier_M1_Callback()
         self.Set_Input_States_RASTER()
+        for variable in (self.raster_brightness, self.raster_contrast, self.raster_gamma):
+            trace_variable(variable, self.Reset_RasterPath_and_Update_Time)
         #if DEBUG and show_unsharp:
         #    self.Set_Input_States_Unsharp()
 

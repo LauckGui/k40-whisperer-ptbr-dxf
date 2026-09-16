@@ -14,6 +14,7 @@ from k40core.importers.dxf import DxfImportError, import_dxf_document, probe_dxf
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import Operation
 from k40core.rasterizer import rasterize_fills
+from k40core.raster_processing import color_intensities_from_document
 from k40core.importing import ImportProgress
 
 
@@ -84,6 +85,7 @@ def import_dxf(
     unit_resolver=None,
     projection_resolver=None,
     raster_dpi=None,
+    raster_color_levels=False,
 ):
     document = import_dxf_document(
         filename,
@@ -106,7 +108,13 @@ def import_dxf(
     if raster_dpi and document.fills:
         if progress is not None:
             progress(ImportProgress("rasterizing", message="Rasterizando preenchimentos DXF..."))
-        result.raster_image = rasterize_fills(document, raster_dpi)
+        color_intensities = (
+            color_intensities_from_document(document)
+            if raster_color_levels else None
+        )
+        result.raster_image = rasterize_fills(
+            document, raster_dpi, color_intensities=color_intensities,
+        )
         result.raster_dpi = float(raster_dpi)
     if not result.cut and not result.engrave and result.raster_image is None:
         raise DxfImportError("O DXF não contém geometria visível para corte ou gravação.")
