@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 *.log
 build/
+build_release/
 dist/
+release/
 k40_whisperer.txt
 k40_whisperer.config.json
 .k40-config-*.tmp

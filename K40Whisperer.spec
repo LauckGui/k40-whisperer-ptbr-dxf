@@ -2,20 +2,26 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 
 project_dir = Path(SPEC).resolve().parent
-hidden_imports = collect_submodules("ezdxf")
+hidden_imports = (
+    collect_submodules("ezdxf")
+    + collect_submodules("cairosvg")
+    + collect_submodules("cairocffi")
+)
+cairo_datas = collect_data_files("cairosvg") + collect_data_files("cairocffi")
+cairo_binaries = collect_dynamic_libs("cairocffi")
 
 a = Analysis(
     [str(project_dir / "k40_whisperer.py")],
     pathex=[str(project_dir)],
-    binaries=[],
+    binaries=cairo_binaries,
     datas=[
         (str(project_dir / "emblem"), "."),
         (str(project_dir / "gpl-3.0.txt"), "."),
-    ],
+    ] + cairo_datas,
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
