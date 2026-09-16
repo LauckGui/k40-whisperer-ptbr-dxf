@@ -2510,22 +2510,41 @@ class Application(Frame):
         footer = Frame(controls)
         footer.pack(fill=X, side=BOTTOM)
 
-        def row(parent, index, label, variable, suffix=""):
-            Label(parent, text=label, anchor=W).grid(row=index, column=0, sticky=W, pady=2)
-            Entry(parent, textvariable=variable, width=9, justify=RIGHT).grid(row=index, column=1, padx=(5, 2), pady=2)
-            Label(parent, text=suffix, anchor=W).grid(row=index, column=2, sticky=W)
+        def adjust(variable, amount):
+            try:
+                value = float(variable.get().replace(",", ".")) + amount
+                variable.set("%.3f" % value)
+            except ValueError:
+                variable.set("%.3f" % amount)
 
-        row(geometry, 0, "Largura", width_mm, "mm")
-        row(geometry, 1, "Altura", height_mm, "mm")
-        row(geometry, 2, "Escala", scale_percent, "%")
+        def row(parent, index, label, variable, suffix="", step=1.0):
+            Label(parent, text=label, anchor=W).grid(row=index, column=0, sticky=W, pady=2)
+            Button(parent, text="−", width=2, command=lambda: adjust(variable, -step)).grid(
+                row=index, column=1, padx=(4, 1), pady=2)
+            Entry(parent, textvariable=variable, width=8, justify=RIGHT).grid(
+                row=index, column=2, padx=1, pady=2)
+            Button(parent, text="+", width=2, command=lambda: adjust(variable, step)).grid(
+                row=index, column=3, padx=(1, 3), pady=2)
+            Label(parent, text=suffix, anchor=W).grid(row=index, column=4, sticky=W)
+
+        row(geometry, 0, "Largura", width_mm, "mm", step=1.0)
+        row(geometry, 1, "Altura", height_mm, "mm", step=1.0)
+        row(geometry, 2, "Escala", scale_percent, "%", step=5.0)
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
-            row=3, column=0, columnspan=3, sticky=W, pady=(4, 0))
-        Label(reference_box, text="Ponto zero").grid(row=0, column=0, sticky=W, pady=2)
-        OptionMenu(reference_box, reference, "Superior esquerdo", "Superior direito",
-                   "Inferior esquerdo", "Inferior direito", "Centro").grid(
-            row=0, column=1, columnspan=2, sticky=EW, pady=2)
-        row(reference_box, 1, "Nudge X", nudge_x, "mm")
-        row(reference_box, 2, "Nudge Y", nudge_y, "mm")
+            row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
+        Label(reference_box, text="Ponto zero da imagem").grid(
+            row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
+        reference_buttons = (
+            ("Superior esquerdo", 1, 0, "↖"), ("Superior direito", 1, 2, "↗"),
+            ("Centro", 2, 1, "⊙"),
+            ("Inferior esquerdo", 3, 0, "↙"), ("Inferior direito", 3, 2, "↘"),
+        )
+        for value, row_index, column, glyph in reference_buttons:
+            Button(reference_box, text=glyph, width=4,
+                   command=lambda item=value: reference.set(item)).grid(
+                       row=row_index, column=column, padx=2, pady=1)
+        row(reference_box, 4, "Nudge X", nudge_x, "mm", step=1.0)
+        row(reference_box, 5, "Nudge Y", nudge_y, "mm", step=1.0)
         Label(view_box, text="Roda: zoom\nBotão central: pan\nA imagem pode sair da borda do vetor.",
               justify=LEFT, anchor=W, fg="#4b5563").pack(fill=X)
 
@@ -2572,6 +2591,19 @@ class Application(Frame):
             preview_photo[0] = ImageTk.PhotoImage(shown)
             preview.create_image(px0, py0, image=preview_photo[0], anchor=NW)
             preview.create_rectangle(px0, py0, px1, py1, outline="#2563eb", width=2)
+            def draw_vectors(ecoord_data, color):
+                previous = None
+                previous_loop = None
+                for coord in ecoord_data:
+                    x, y, loop = coord[:3]
+                    current = point((x-xmin)*25.4, (ymax-y)*25.4)
+                    if previous is not None and loop == previous_loop:
+                        preview.create_line(*previous, *current, fill=color, width=2,
+                                            capstyle="round", joinstyle="round")
+                    previous, previous_loop = current, loop
+            # Always keep the geometry readable above the bitmap layer.
+            draw_vectors(self.VengData.ecoords, "#1d4ed8")
+            draw_vectors(self.VcutData.ecoords, "#dc2626")
             preview.create_line(*point(ref_x, ref_y), *point(ref_x, ref_y), fill="#111827")
             preview.create_oval(x0-3, y0-3, x0+3, y0+3, fill="#dc2626", outline="")
 
