@@ -174,6 +174,8 @@ class Application(Frame):
         self.UI_image = None
         self.job_document = None
         self.source_raster_dpi = 0.0
+        self.imported_image_source = None
+        self.imported_image_filename = None
         #if self.HomeUR.get():
         self.move_head_window_temporary([0.0,0.0])
         #else:
@@ -808,6 +810,11 @@ class Application(Frame):
                                         command=self.MULTIPLE_COPIES_Window)
         self.Edit_Button       = Button(self.master, text="Editar desenho",
                                         command=self.EDIT_VECTOR_Window)
+        self.Import_Image_Button = Button(self.master, text="Importar imagem",
+                                          command=self.menu_File_Import_Image)
+        self.Align_Image_Button = Button(self.master, text="Alinhar imagem",
+                                         command=self.IMAGE_ALIGNMENT_Window,
+                                         state=DISABLED)
         
         self.Home_Button       = Button(self.master,text="Origem",          command=self.Home)
         self.UnLock_Button     = Button(self.master,text="Liberar eixos",   command=self.Unlock)
@@ -2424,6 +2431,218 @@ class Application(Frame):
             
         self.DESIGN_FILE = fileselect
         self.menu_View_Refresh()
+
+    def menu_File_Import_Image(self, event=None):
+        """Attach a bitmap without replacing the vector document."""
+        if self.GUI_Disabled:
+            return
+        initial_dir = os.path.dirname(self.imported_image_filename or self.DESIGN_FILE)
+        if not os.path.isdir(initial_dir):
+            initial_dir = self.HOME_DIR
+        filename = askopenfilename(
+            title="Importar imagem para gravação raster",
+            initialdir=initial_dir,
+            filetypes=[
+                ("Imagens suportadas", ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")),
+                ("PNG", "*.png"), ("JPEG", ("*.jpg", "*.jpeg")),
+                ("Bitmap", "*.bmp"), ("TIFF", ("*.tif", "*.tiff")),
+                ("Todos os arquivos", "*"),
+            ],
+        )
+        if not filename or not os.path.isfile(filename):
+            return
+        try:
+            with Image.open(filename) as image:
+                self.imported_image_source = image.convert("RGBA").copy()
+            self.imported_image_filename = filename
+            self.Align_Image_Button.configure(state=NORMAL)
+            self.IMAGE_ALIGNMENT_Window()
+        except Exception as exc:
+            self.statusbar.configure(bg="red")
+            self.statusMessage.set("Falha ao abrir imagem: %s" % exc)
+            message_box("Importar imagem", "Não foi possível abrir a imagem:\n%s" % exc)
+
+    def IMAGE_ALIGNMENT_Window(self):
+        """Compact, live alignment UI for the pending bitmap layer.
+
+        The image stays separate from the vector source. Applying builds the
+        raster work image only; vector ECoords are never altered here.
+        """
+        if self.imported_image_source is None:
+            self.statusbar.configure(bg="yellow")
+            self.statusMessage.set("Importe uma imagem antes de alinhá-la.")
+            return
+        dialog = Toplevel(self.master)
+        dialog.title("Alinhar imagem")
+        dialog.geometry("940x650")
+        dialog.minsize(760, 520)
+        dialog.transient(self.master)
+
+        image = self.imported_image_source
+        default_width = max(1.0, image.width / 254.0 * 25.4)
+        default_height = max(1.0, image.height / 254.0 * 25.4)
+        width_mm = StringVar(value="%.3f" % default_width)
+        height_mm = StringVar(value="%.3f" % default_height)
+        scale_percent = StringVar(value="100")
+        nudge_x = StringVar(value="0")
+        nudge_y = StringVar(value="0")
+        reference = StringVar(value="Centro")
+        keep_ratio = BooleanVar(value=True)
+        zoom = [1.0]
+        pan = [0, 0]
+        drag = [None]
+        preview_photo = [None]
+
+        root_frame = Frame(dialog, padx=10, pady=10)
+        root_frame.pack(fill=BOTH, expand=True)
+        controls = Frame(root_frame, width=225)
+        controls.pack(side=LEFT, fill=Y, padx=(0, 10))
+        preview = Canvas(root_frame, background="#d1d5db", highlightthickness=1,
+                         highlightbackground="#9ca3af")
+        preview.pack(side=LEFT, fill=BOTH, expand=True)
+
+        geometry = LabelFrame(controls, text=" Geometria ", padx=8, pady=7)
+        geometry.pack(fill=X, pady=(0, 7))
+        reference_box = LabelFrame(controls, text=" Referência e deslocamento ", padx=8, pady=7)
+        reference_box.pack(fill=X, pady=(0, 7))
+        view_box = LabelFrame(controls, text=" Visualização ", padx=8, pady=7)
+        view_box.pack(fill=X, pady=(0, 7))
+        footer = Frame(controls)
+        footer.pack(fill=X, side=BOTTOM)
+
+        def row(parent, index, label, variable, suffix=""):
+            Label(parent, text=label, anchor=W).grid(row=index, column=0, sticky=W, pady=2)
+            Entry(parent, textvariable=variable, width=9, justify=RIGHT).grid(row=index, column=1, padx=(5, 2), pady=2)
+            Label(parent, text=suffix, anchor=W).grid(row=index, column=2, sticky=W)
+
+        row(geometry, 0, "Largura", width_mm, "mm")
+        row(geometry, 1, "Altura", height_mm, "mm")
+        row(geometry, 2, "Escala", scale_percent, "%")
+        Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
+            row=3, column=0, columnspan=3, sticky=W, pady=(4, 0))
+        Label(reference_box, text="Ponto zero").grid(row=0, column=0, sticky=W, pady=2)
+        OptionMenu(reference_box, reference, "Superior esquerdo", "Superior direito",
+                   "Inferior esquerdo", "Inferior direito", "Centro").grid(
+            row=0, column=1, columnspan=2, sticky=EW, pady=2)
+        row(reference_box, 1, "Nudge X", nudge_x, "mm")
+        row(reference_box, 2, "Nudge Y", nudge_y, "mm")
+        Label(view_box, text="Roda: zoom\nBotão central: pan\nA imagem pode sair da borda do vetor.",
+              justify=LEFT, anchor=W, fg="#4b5563").pack(fill=X)
+
+        def values():
+            try:
+                width = float(width_mm.get().replace(",", "."))
+                height = float(height_mm.get().replace(",", "."))
+                dx = float(nudge_x.get().replace(",", "."))
+                dy = float(nudge_y.get().replace(",", "."))
+                if width <= 0 or height <= 0:
+                    raise ValueError
+                return width, height, dx, dy
+            except ValueError:
+                return None
+
+        def draw_preview(*unused):
+            data = values()
+            if data is None:
+                return
+            width, height, dx, dy = data
+            preview.delete("all")
+            cw, ch = max(1, preview.winfo_width()), max(1, preview.winfo_height())
+            xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+            vector_w = max(1.0, (xmax-xmin)*25.4)
+            vector_h = max(1.0, (ymax-ymin)*25.4)
+            ref_map = {"Superior esquerdo": (0, 0), "Superior direito": (vector_w, 0),
+                       "Inferior esquerdo": (0, vector_h), "Inferior direito": (vector_w, vector_h),
+                       "Centro": (vector_w/2.0, vector_h/2.0)}
+            ref_x, ref_y = ref_map[reference.get()]
+            anchor_map = {"Superior esquerdo": (0, 0), "Superior direito": (1, 0),
+                          "Inferior esquerdo": (0, 1), "Inferior direito": (1, 1), "Centro": (.5, .5)}
+            ax, ay = anchor_map[reference.get()]
+            ix, iy = ref_x + dx - ax*width, ref_y + dy - ay*height
+            pad = max(8.0, max(width, height, vector_w, vector_h)*.12)
+            min_x, max_x = min(-pad, ix-pad), max(vector_w+pad, ix+width+pad)
+            min_y, max_y = min(-pad, iy-pad), max(vector_h+pad, iy+height+pad)
+            fit = min(cw/max(1, max_x-min_x), ch/max(1, max_y-min_y)) * zoom[0]
+            def point(x, y): return (pan[0] + (x-min_x)*fit, pan[1] + (y-min_y)*fit)
+            x0, y0 = point(0, 0); x1, y1 = point(vector_w, vector_h)
+            preview.create_rectangle(x0, y0, x1, y1, outline="#dc2626", width=2)
+            px0, py0 = point(ix, iy); px1, py1 = point(ix+width, iy+height)
+            target_size = (max(1, int(abs(px1-px0))), max(1, int(abs(py1-py0))))
+            shown = image.resize(target_size, Image.LANCZOS)
+            preview_photo[0] = ImageTk.PhotoImage(shown)
+            preview.create_image(px0, py0, image=preview_photo[0], anchor=NW)
+            preview.create_rectangle(px0, py0, px1, py1, outline="#2563eb", width=2)
+            preview.create_line(*point(ref_x, ref_y), *point(ref_x, ref_y), fill="#111827")
+            preview.create_oval(x0-3, y0-3, x0+3, y0+3, fill="#dc2626", outline="")
+
+        def fit_view():
+            zoom[0] = 1.0
+            pan[:] = [0, 0]
+            draw_preview()
+
+        def wheel(event):
+            zoom[0] = max(.2, min(8.0, zoom[0] * (1.15 if event.delta > 0 else 1/1.15)))
+            draw_preview()
+
+        def pan_start(event): drag[0] = (event.x, event.y)
+        def pan_move(event):
+            if drag[0]:
+                pan[0] += event.x-drag[0][0]; pan[1] += event.y-drag[0][1]
+                drag[0] = (event.x, event.y); draw_preview()
+
+        def apply_image():
+            data = values()
+            if data is None:
+                return
+            width, height, dx, dy = data
+            xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+            vector_w = max(0.0, (xmax-xmin)*25.4)
+            vector_h = max(0.0, (ymax-ymin)*25.4)
+            ref_map = {"Superior esquerdo": (0, 0), "Superior direito": (vector_w, 0),
+                       "Inferior esquerdo": (0, vector_h), "Inferior direito": (vector_w, vector_h),
+                       "Centro": (vector_w/2.0, vector_h/2.0)}
+            anchor_map = {"Superior esquerdo": (0, 0), "Superior direito": (1, 0),
+                          "Inferior esquerdo": (0, 1), "Inferior direito": (1, 1), "Centro": (.5, .5)}
+            ref_x, ref_y = ref_map[reference.get()]
+            ax, ay = anchor_map[reference.get()]
+            image_x, image_y = ref_x + dx - ax*width, ref_y + dy - ay*height
+            if image_x < -0.001 or image_y < -0.001:
+                message_box("Alinhar imagem", "Nesta primeira versão, a imagem deve permanecer à direita e abaixo da origem do desenho.\nUse outro ponto zero ou ajuste os nudges.")
+                return
+            # Raster is generated at a stable 254 DPI; physical dimensions,
+            # not the source pixel count, define the laser output size.
+            dpi = 254.0
+            raster = image.resize((max(1, int(round(width/25.4*dpi))),
+                                   max(1, int(round(height/25.4*dpi)))), Image.LANCZOS)
+            canvas_w = max(vector_w, image_x+width)
+            canvas_h = max(vector_h, image_y+height)
+            composed = Image.new("RGBA", (max(1, int(round(canvas_w/25.4*dpi))),
+                                           max(1, int(round(canvas_h/25.4*dpi)))),
+                                 (255, 255, 255, 0))
+            composed.alpha_composite(raster, (int(round(image_x/25.4*dpi)),
+                                              int(round(image_y/25.4*dpi))))
+            self.RengData.set_image(composed)
+            self.input_dpi = dpi
+            self.source_raster_dpi = dpi
+            self.wim, self.him = composed.size
+            self.aspect_ratio = float(self.wim) / max(1, self.him)
+            self.Design_bounds = (xmin, xmin+canvas_w/25.4, ymin, ymin+canvas_h/25.4)
+            self.Align_Image_Button.configure(state=NORMAL)
+            self.statusbar.configure(bg="white")
+            self.statusMessage.set("Imagem alinhada e anexada ao raster.")
+            self.menu_View_Refresh()
+            dialog.destroy()
+
+        Button(view_box, text="Ajustar à área", command=fit_view).pack(fill=X, pady=(6, 0))
+        Button(footer, text="Cancelar", command=dialog.destroy).pack(side=RIGHT)
+        Button(footer, text="Aplicar", command=apply_image).pack(side=RIGHT, padx=(0, 6))
+        for var in (width_mm, height_mm, scale_percent, nudge_x, nudge_y, reference):
+            trace_variable(var, draw_preview)
+        preview.bind("<MouseWheel>", wheel)
+        preview.bind("<Button-2>", pan_start)
+        preview.bind("<B2-Motion>", pan_move)
+        preview.bind("<Configure>", draw_preview)
+        dialog.after(30, draw_preview)
         
     def menu_File_Raster_Engrave(self):
         self.menu_File_save_EGV(operation_type="Raster_Eng")
@@ -5244,6 +5463,9 @@ class Application(Frame):
                 Yloc=Yloc+standard_button_h+4
                 self.Edit_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
                 self.Array_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
+                Yloc=Yloc+standard_button_h+4
+                self.Import_Image_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
+                self.Align_Image_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
                     self.separator5.place(x=8, y=Yloc, width=334, height=1)
