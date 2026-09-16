@@ -2744,6 +2744,11 @@ class Application(Frame):
             padding_y = max(0.0, -image_y)
             canvas_w = padding_x + max(vector_w, image_x+width)
             canvas_h = padding_y + max(vector_h, image_y+height)
+            # O raster usa Y a partir do topo, enquanto os ECoords vetoriais
+            # usam Y a partir da base. Quando o raster cresce para baixo, os
+            # vetores precisam subir no sistema interno para permanecerem na
+            # mesma posição visual exibida pela janela de alinhamento.
+            vector_shift_y = canvas_h - padding_y - vector_h
             composed = Image.new("RGBA", (max(1, int(round(canvas_w/25.4*dpi))),
                                            max(1, int(round(canvas_h/25.4*dpi)))),
                                  (255, 255, 255, 0))
@@ -2753,7 +2758,12 @@ class Application(Frame):
                 for dataset in (self.VengData, self.VcutData):
                     for point in dataset.ecoords:
                         point[0] += padding_x/25.4
-                        point[1] += padding_y/25.4
+                        point[1] += vector_shift_y/25.4
+                    dataset.computeEcoordsLen()
+            elif vector_shift_y:
+                for dataset in (self.VengData, self.VcutData):
+                    for point in dataset.ecoords:
+                        point[1] += vector_shift_y/25.4
                     dataset.computeEcoordsLen()
             self.RengData.set_image(composed)
             self.include_Reng.set(1)
