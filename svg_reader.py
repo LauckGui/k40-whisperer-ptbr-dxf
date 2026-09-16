@@ -700,6 +700,10 @@ class SVG_READER(inkex.Effect):
         if self.inkscape_exe is None:
             try:
                 import cairosvg
+                for node in self.document.getroot().xpath('//svg:image', namespaces=inkex.NSS):
+                    href = node.get('href') or node.get(inkex.addNS('href', 'xlink')) or ''
+                    if href.lower().startswith(('http://', 'https://')):
+                        raise ValueError('Imagens remotas não são permitidas em SVG.')
                 width_mm, height_mm = self.SVG_Size[0], self.SVG_Size[1]
                 output_width = max(1, int(round(width_mm/25.4*self.image_dpi)))
                 output_height = max(1, int(round(height_mm/25.4*self.image_dpi)))
