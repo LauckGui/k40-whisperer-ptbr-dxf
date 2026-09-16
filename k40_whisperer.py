@@ -2525,8 +2525,6 @@ class Application(Frame):
                 )
             return self.Get_Design_Bounds()
 
-        footer = Frame(dialog, padx=10, pady=8)
-        footer.pack(side=BOTTOM, fill=X)
         root_frame = Frame(dialog, padx=10, pady=10)
         root_frame.pack(fill=BOTH, expand=True)
         controls = Frame(root_frame, width=385)
@@ -2543,6 +2541,8 @@ class Application(Frame):
         raster_box.pack(fill=X, pady=(0, 7))
         mask_box = LabelFrame(controls, text=" Máscara por vetor ", padx=8, pady=7)
         mask_box.pack(fill=X, pady=(0, 7))
+        footer = Frame(controls)
+        footer.pack(fill=X)
 
         def adjust(variable, amount):
             try:
@@ -2661,10 +2661,10 @@ class Application(Frame):
         row(geometry, 1, "Altura", height_mm, "mm", step=1.0)
         row(geometry, 2, "Escala", scale_percent, "%", step=5.0)
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
-            row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
+            row=1, column=5, sticky=W, padx=(10, 0))
         Button(geometry, text="Redefinir escala", command=reset_scale).grid(
-            row=0, column=5, rowspan=4, sticky="nsew", padx=(10, 0))
-        Label(reference_box, text="Ponto zero e nudge").grid(
+            row=2, column=5, sticky="nsew", padx=(10, 0), pady=2)
+        Label(reference_box, text="Ponto zero e deslocamento").grid(
             row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
         grid_buttons = (
             (1, 0, self.UL_image, lambda: change_reference("Superior esquerdo")),
@@ -2689,8 +2689,8 @@ class Application(Frame):
         Label(reference_box, text="Passo", anchor=W).grid(row=3, column=3, sticky=W, padx=(12, 0))
         Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=3, column=4, sticky=EW)
         Label(reference_box, text="mm").grid(row=3, column=5, sticky=W)
-        Button(reference_box, text="Redefinir\nnudge", command=reset_nudges).grid(
-            row=1, column=6, rowspan=3, sticky="nsew", padx=(10, 0))
+        Button(reference_box, text="Redefinir deslocamento", command=reset_nudges).grid(
+            row=4, column=3, columnspan=3, sticky=EW, pady=(5, 0))
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
             Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
@@ -2727,20 +2727,44 @@ class Application(Frame):
             "Bayer 8×8": "Padrão regular e rápido; adequado para superfícies homogêneas.",
         }
         algorithm_tooltip = [None]
-        def show_algorithm_tooltip(event):
+        def show_algorithm_tooltip(text, x_root, y_root):
             hide_algorithm_tooltip()
             tip = Toplevel(dialog)
             tip.wm_overrideredirect(True)
-            Label(tip, text=algorithm_help.get(self.raster_dither_method.get(), ""),
+            Label(tip, text=text,
                   justify=LEFT, padx=6, pady=4, bg="#fff8c5", relief=SOLID, borderwidth=1).pack()
-            tip.wm_geometry("+%d+%d" % (event.x_root + 12, event.y_root + 18))
+            tip.wm_geometry("+%d+%d" % (x_root + 12, y_root + 18))
             algorithm_tooltip[0] = tip
         def hide_algorithm_tooltip(event=None):
             if algorithm_tooltip[0] is not None:
                 algorithm_tooltip[0].destroy()
                 algorithm_tooltip[0] = None
-        algorithm_selector.bind("<Enter>", show_algorithm_tooltip)
+        def show_current_algorithm_tooltip(event):
+            show_algorithm_tooltip(algorithm_help.get(self.raster_dither_method.get(), ""),
+                                   event.x_root, event.y_root)
+        def show_algorithm_menu_tooltip(widget, x, y):
+            try:
+                index = int(dialog.tk.call(widget, "nearest", y))
+                value = dialog.tk.call(widget, "get", index)
+                root_x = int(dialog.tk.call("winfo", "rootx", widget)) + int(x)
+                root_y = int(dialog.tk.call("winfo", "rooty", widget)) + int(y)
+                show_algorithm_tooltip(algorithm_help.get(value, ""), root_x, root_y)
+            except Exception:
+                pass
+        def bind_algorithm_menu_tooltips(event=None):
+            """Attach hover help to ttk's native combobox pop-down list."""
+            try:
+                popdown = str(dialog.tk.call("ttk::combobox::PopdownWindow", str(algorithm_selector)))
+                listbox = popdown + ".f.l"
+                motion = dialog.register(show_algorithm_menu_tooltip)
+                leave = dialog.register(hide_algorithm_tooltip)
+                dialog.tk.call("bind", listbox, "<Motion>", motion + " %W %x %y")
+                dialog.tk.call("bind", listbox, "<Leave>", leave)
+            except Exception:
+                pass
+        algorithm_selector.bind("<Enter>", show_current_algorithm_tooltip)
         algorithm_selector.bind("<Leave>", hide_algorithm_tooltip)
+        algorithm_selector.bind("<Button-1>", lambda event: dialog.after(25, bind_algorithm_menu_tooltips))
 
         mask_status = StringVar(value=("Borda selecionada" if selected_mask[0]
                                        else "Nenhuma borda selecionada"))
@@ -3002,8 +3026,11 @@ class Application(Frame):
         for var in (width_mm, height_mm, scale_percent, nudge_x, nudge_y, reference,
                     self.raster_brightness, self.raster_contrast, self.raster_gamma, self.negate):
             trace_variable(var, draw_preview)
-        algorithm_selector.bind("<<ComboboxSelected>>", lambda event: (
-            preview_dither.__setitem__(0, True), draw_preview()))
+        def apply_algorithm_selection(event):
+            hide_algorithm_tooltip()
+            preview_dither[0] = True
+            draw_preview()
+        algorithm_selector.bind("<<ComboboxSelected>>", apply_algorithm_selection)
         preview.bind("<MouseWheel>", wheel)
         preview.bind("<Button-1>", image_drag_start)
         preview.bind("<B1-Motion>", image_drag_move)
