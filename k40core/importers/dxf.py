@@ -465,25 +465,8 @@ def import_dxf_document(
         optimized_segment_count = sum(
             len(path.segments) for vector in result.vectors for path in vector.paths
         )
-        result.issues.append(ImportIssue(
-            code="dxf.topology_composed",
-            message=(
-                "%d objetos e %d segmentos foram compostos em %d objetos, "
-                "%d caminhos e %d segmentos."
-                % (source_object_count, source_segment_count, len(result.vectors),
-                   sum(len(vector.paths) for vector in result.vectors),
-                   optimized_segment_count)
-            ),
-            severity=IssueSeverity.INFO,
-            details={
-                "source_objects": source_object_count,
-                "source_segments": source_segment_count,
-                "result_objects": len(result.vectors),
-                "result_paths": sum(len(vector.paths) for vector in result.vectors),
-                "result_segments": optimized_segment_count,
-                "tolerance_mm": tolerance_mm,
-            },
-        ))
+        # Estatísticas de composição permanecem nos timings internos. Não
+        # interrompem o fluxo normal com uma janela após cada importação.
         timings["optimizing"] = perf_counter() - phase_started
     else:
         timings["optimizing"] = 0.0

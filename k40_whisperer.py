@@ -2756,6 +2756,8 @@ class Application(Frame):
                         point[1] += padding_y/25.4
                     dataset.computeEcoordsLen()
             self.RengData.set_image(composed)
+            self.include_Reng.set(1)
+            self.SCALE = 0
             self.input_dpi = dpi
             self.source_raster_dpi = dpi
             self.wim, self.him = composed.size
