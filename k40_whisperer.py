@@ -2524,6 +2524,8 @@ class Application(Frame):
                 )
             return self.Get_Design_Bounds()
 
+        footer = Frame(dialog, padx=10, pady=8)
+        footer.pack(side=BOTTOM, fill=X)
         root_frame = Frame(dialog, padx=10, pady=10)
         root_frame.pack(fill=BOTH, expand=True)
         controls = Frame(root_frame, width=385)
@@ -2540,8 +2542,6 @@ class Application(Frame):
         raster_box.pack(fill=X, pady=(0, 7))
         mask_box = LabelFrame(controls, text=" Máscara por vetor ", padx=8, pady=7)
         mask_box.pack(fill=X, pady=(0, 7))
-        footer = Frame(controls)
-        footer.pack(fill=X)
 
         def adjust(variable, amount):
             try:
