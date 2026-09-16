@@ -4,6 +4,9 @@ setlocal
 set "PROJECT_DIR=%~dp0"
 set "PYTHON_EXE=%PROJECT_DIR%.venv-%COMPUTERNAME%\Scripts\python.exe"
 set "APP_SCRIPT=%PROJECT_DIR%k40_whisperer.py"
+set "CAIRO_RUNTIME=%PROJECT_DIR%tools\cairo-runtime"
+
+if exist "%CAIRO_RUNTIME%\cairo.dll" set "PATH=%CAIRO_RUNTIME%;%PATH%"
 
 "%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf, cairosvg" >nul 2>&1
 if errorlevel 1 (

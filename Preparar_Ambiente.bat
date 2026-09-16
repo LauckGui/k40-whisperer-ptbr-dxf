@@ -4,6 +4,9 @@ setlocal
 set "PROJECT_DIR=%~dp0"
 set "VENV_DIR=%PROJECT_DIR%.venv-%COMPUTERNAME%"
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
+set "CAIRO_RUNTIME=%PROJECT_DIR%tools\cairo-runtime"
+
+if exist "%CAIRO_RUNTIME%\cairo.dll" set "PATH=%CAIRO_RUNTIME%;%PATH%"
 
 pushd "%PROJECT_DIR%"
 
