@@ -217,6 +217,15 @@ class Application(Frame):
                                    outline=color, width=width)
             draw.rounded_rectangle((p(9),p(9),p(21),p(21)), radius=p(1),
                                    fill="white", outline=color, width=width)
+        elif name in ("image", "image_edit"):
+            draw.rectangle((p(2),p(4),p(21),p(20)), outline=color, width=width)
+            draw.ellipse((p(5),p(7),p(8),p(10)), fill=color)
+            draw.polygon(((p(4),p(18)),(p(10),p(11)),(p(14),p(15)),
+                          (p(17),p(12)),(p(20),p(18))), fill=color)
+            if name == "image_edit":
+                draw.line((p(14),p(20),p(22),p(12)), fill="white", width=max(3, width+1))
+                draw.line((p(14),p(20),p(22),p(12)), fill=color, width=width)
+                draw.polygon(((p(13),p(21)),(p(16),p(20)),(p(14),p(18))), fill=color)
         elif name == "transform":
             draw.rectangle((p(4),p(4),p(16),p(16)), outline=color, width=width)
             draw.line((p(12),p(1),p(12),p(8)), fill=color, width=width)
@@ -360,6 +369,10 @@ class Application(Frame):
         self.master.bind('<Control-h>' , self.Home)
         self.master.bind('<Control-u>' , self.Unlock)
         self.master.bind('<Escape>'    , self.Stop_Job)
+        self.master.bind('<Left>'      , lambda event: self._keyboard_jog(event, self.Move_Left))
+        self.master.bind('<Right>'     , lambda event: self._keyboard_jog(event, self.Move_Right))
+        self.master.bind('<Up>'        , lambda event: self._keyboard_jog(event, self.Move_Up))
+        self.master.bind('<Down>'      , lambda event: self._keyboard_jog(event, self.Move_Down))
         self.master.bind('<Control-t>' , self.TRACE_Settings_Window)
 
         self.include_Reng = BooleanVar()
@@ -823,11 +836,11 @@ class Application(Frame):
         self.Reload_Button     = Button(self.master,text="Recarregar Vetor", command=self.menu_Reload_Design)
         self.Array_Button      = Button(self.master, text="Múltiplas Cópias",
                                         command=self.MULTIPLE_COPIES_Window)
-        self.Edit_Button       = Button(self.master, text="Editar desenho",
+        self.Edit_Button       = Button(self.master, text="Editar Vetor",
                                         command=self.EDIT_VECTOR_Window)
-        self.Import_Image_Button = Button(self.master, text="Importar imagem",
+        self.Import_Image_Button = Button(self.master, text="Abrir Imagem",
                                           command=self.menu_File_Import_Image)
-        self.Align_Image_Button = Button(self.master, text="Alinhar imagem",
+        self.Align_Image_Button = Button(self.master, text="Editar Imagem",
                                          command=self.IMAGE_ALIGNMENT_Window,
                                          state=DISABLED)
         
@@ -901,6 +914,8 @@ class Application(Frame):
             "reload": self.make_ui_icon("reload", 20),
             "copies": self.make_ui_icon("copies", 20),
             "transform": self.make_ui_icon("transform", 20),
+            "image": self.make_ui_icon("image", 20),
+            "image_edit": self.make_ui_icon("image_edit", 20),
             "mirror_horizontal": self.make_ui_icon("mirror_horizontal", 20),
             "mirror_vertical": self.make_ui_icon("mirror_vertical", 20),
             "preview": self.make_ui_icon("preview", 18, "white"),
@@ -926,6 +941,8 @@ class Application(Frame):
         self.Reload_Button.configure(image=self.ui_icons["reload"], compound=LEFT)
         self.Array_Button.configure(image=self.ui_icons["copies"], compound=LEFT)
         self.Edit_Button.configure(image=self.ui_icons["transform"], compound=LEFT)
+        self.Import_Image_Button.configure(image=self.ui_icons["image"], compound=LEFT)
+        self.Align_Image_Button.configure(image=self.ui_icons["image_edit"], compound=LEFT)
         self.Home_Button.configure(image=self.ui_icons["home"], compound=LEFT)
         self.UnLock_Button.configure(image=self.ui_icons["unlock"], compound=LEFT)
         self.GoTo_Button.configure(image=self.ui_icons["target_compact"], compound=LEFT)
@@ -941,6 +958,7 @@ class Application(Frame):
         self.Preview_Menu_Button.configure(fg="white", padx=0)
         for button in (self.Initialize_Button, self.Open_Button, self.Reload_Button,
                        self.Array_Button, self.Edit_Button,
+                       self.Import_Image_Button, self.Align_Image_Button,
                        self.Home_Button, self.UnLock_Button, self.GoTo_Button,
                        self.Run_Button, self.Pause_Button, self.Stop_Button,
                        self.Preview_Button):
@@ -1779,6 +1797,31 @@ class Application(Frame):
     def Settings_ReLoad_Click(self, event):
         win_id=self.grab_current()
 
+    def _keyboard_jog(self, event, action):
+        """Run main-window jog shortcuts without hijacking editor fields."""
+        try:
+            if event.widget.winfo_toplevel() != self.master:
+                return
+            if event.widget.winfo_class() in (
+                    "Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "TCombobox"):
+                return
+        except Exception:
+            return
+        if self.GUI_Disabled:
+            return "break"
+        action()
+        return "break"
+
+    def _bind_escape_close(self, window, callback=None):
+        """Make Escape close a modal editor before it reaches the main window."""
+        def close_editor(event=None):
+            if callback is not None:
+                callback()
+            elif window.winfo_exists():
+                window.destroy()
+            return "break"
+        window.bind("<Escape>", close_editor)
+
     def Close_Current_Window_Click(self,event=None):
         current_name = event.widget.winfo_parent()
         win_id = event.widget.nametowidget(current_name)
@@ -2522,6 +2565,7 @@ class Application(Frame):
         dialog.minsize(760, 520)
         dialog.transient(self.master)
         dialog.grab_set()
+        self._bind_escape_close(dialog)
 
         image = self.imported_image_source
         default_width = max(1.0, image.width / 254.0 * 25.4)
@@ -3091,7 +3135,6 @@ class Application(Frame):
         dialog.bind("<Right>", lambda event: nudge(nudge_x, 1.0))
         dialog.bind("<Up>", lambda event: nudge(nudge_y, -1.0))
         dialog.bind("<Down>", lambda event: nudge(nudge_y, 1.0))
-        dialog.bind("<Escape>", lambda event: dialog.destroy())
         dialog.after(30, draw_preview)
         
     def menu_File_Raster_Engrave(self):
@@ -5909,14 +5952,14 @@ class Application(Frame):
                 self.separator1.place(x=8, y=Yloc, width=334, height=1)
                 Yloc=Yloc+6
 
+                self.Reload_Button.place_forget()
                 self.Open_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
-                self.Reload_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
-                Yloc=Yloc+standard_button_h+4
-                self.Edit_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
-                self.Array_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
+                self.Edit_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
                 Yloc=Yloc+standard_button_h+4
                 self.Import_Image_Button.place(x=12, y=Yloc, width=160, height=standard_button_h)
                 self.Align_Image_Button.place(x=174, y=Yloc, width=168, height=standard_button_h)
+                Yloc=Yloc+standard_button_h+4
+                self.Array_Button.place(x=12, y=Yloc, width=330, height=standard_button_h)
                 if h>=self.pi_mode_height:
                     Yloc=Yloc+standard_button_h+6
                     self.separator5.place(x=8, y=Yloc, width=334, height=1)
@@ -7107,6 +7150,7 @@ class Application(Frame):
         copies.resizable(0, 0)
         copies.transient(self.master)
         copies.grab_set()
+        self._bind_escape_close(copies)
 
         mode = StringVar(value=existing.mode if existing else "grid")
         columns = StringVar(value=str(existing.columns if existing else 2))
@@ -7312,6 +7356,7 @@ class Application(Frame):
         editor.resizable(0, 0)
         editor.transient(self.master)
         editor.grab_set()
+        self._bind_escape_close(editor)
 
         scale_percent = StringVar(value="100")
         width_mm = StringVar()
@@ -7783,6 +7828,7 @@ class Application(Frame):
         job_settings.transient(self.master)
         job_settings.grab_set()
         job_settings.focus_set()
+        self._bind_escape_close(job_settings)
 
         container = Frame(job_settings, padx=16, pady=14)
         container.pack(fill=BOTH, expand=1)
@@ -7835,6 +7881,7 @@ class Application(Frame):
         gen_settings.resizable(0,0)
         gen_settings.title('Configurações gerais')
         gen_settings.iconname("General Settings")
+        self._bind_escape_close(gen_settings)
 
         D_Yloc  = 6
         D_dY = 26
@@ -8133,6 +8180,7 @@ class Application(Frame):
         raster_settings.resizable(0,0)
         raster_settings.title('Configurações de raster')
         raster_settings.iconname("Raster Settings")
+        self._bind_escape_close(raster_settings)
 
         D_Yloc  = 6
         D_dY = 24
@@ -8361,6 +8409,7 @@ class Application(Frame):
         rotary_settings.resizable(0,0)
         rotary_settings.title('Configurações do rotativo')
         rotary_settings.iconname("Rotary Settings")
+        self._bind_escape_close(rotary_settings)
 
         D_Yloc  = 6
         D_dY = 30
@@ -8430,6 +8479,8 @@ class Application(Frame):
             win_id=self.grab_current()
             self.PreviewCanvas.delete('trace')
             win_id.destroy()
+
+        self._bind_escape_close(trace_window, Close_Click)
 
         def Close_and_Send_Click():
             win_id=self.grab_current()
@@ -8531,6 +8582,7 @@ class Application(Frame):
         egv_send.resizable(0,0)
         egv_send.title('Enviar EGV')
         egv_send.iconname("EGV Send")
+        self._bind_escape_close(egv_send)
 
         D_Yloc  = 0
         D_dY = 28
