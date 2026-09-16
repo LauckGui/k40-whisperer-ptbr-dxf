@@ -2685,10 +2685,21 @@ class Application(Frame):
             (3, 1, self.down_image, lambda: nudge(nudge_y, 1.0)),
             (3, 2, self.LR_image, lambda: change_reference("Inferior direito")),
         )
+        def keep_square(button):
+            """Match icon-button height to its grid-expanded visual width."""
+            def resize(event):
+                # Image buttons use pixels for width/height.  Account for the
+                # native border so their exterior dimensions become identical.
+                frame_width = button.winfo_reqwidth() - int(button.cget("width"))
+                target_height = max(1, event.width-frame_width)
+                if int(button.cget("height")) != target_height:
+                    button.configure(height=target_height)
+            button.bind("<Configure>", resize)
+
         for row_index, column, icon, action in grid_buttons:
-            # Explicit dimensions keep the 3×3 control grid square even when
-            # the neighbouring fields request taller rows.
-            Button(reference_box, image=icon, width=20, height=20, command=action).grid(
+            button = Button(reference_box, image=icon, width=20, height=20, command=action)
+            keep_square(button)
+            button.grid(
                 row=row_index, column=column, padx=1, pady=1, sticky="nsew")
         Label(reference_box, text="X", anchor=W).grid(row=1, column=3, sticky=W, padx=(12, 0))
         Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=1, column=4, sticky=EW)
