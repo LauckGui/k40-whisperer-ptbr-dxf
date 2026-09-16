@@ -765,6 +765,81 @@ class SVG_READER(inkex.Effect):
         except:
             raise Exception("Temp dir failed to delete:\n%s" %(tmp_dir) )
 
+    def normalize_content_bounds(self, page_width, page_height):
+        """Crop raster content and translate vectors to a shared local origin.
+
+        SVG documents often retain a full page (for example A4) even when the
+        artwork occupies a small region. K40 coordinates, on the other hand,
+        are expected to begin at the top-left of the imported artwork. The
+        raster scanlines use a bottom-up Y axis, as do the converted SVG
+        paths, so both can safely share the cropped content origin.
+        """
+        vector_bounds = None
+        if self.lines:
+            vector_bounds = (
+                min(min(line[0], line[2]) for line in self.lines),
+                max(max(line[0], line[2]) for line in self.lines),
+                min(min(line[1], line[3]) for line in self.lines),
+                max(max(line[1], line[3]) for line in self.lines),
+            )
+
+        raster_bounds = None
+        raster_bbox = None
+        if self.raster_PIL is not None:
+            raster = self.raster_PIL.convert("L")
+            # Ignore the white page while retaining antialiased image edges.
+            raster_bbox = raster.point(lambda value: 255 if value < 250 else 0).getbbox()
+            if raster_bbox is not None:
+                left, top, right, bottom = raster_bbox
+                pixel_width, pixel_height = raster.size
+                raster_bounds = (
+                    left * page_width / pixel_width,
+                    right * page_width / pixel_width,
+                    page_height - bottom * page_height / pixel_height,
+                    page_height - top * page_height / pixel_height,
+                )
+
+        content_bounds = [bounds for bounds in (vector_bounds, raster_bounds) if bounds]
+        if not content_bounds:
+            self.raster_PIL = None
+            return (page_width, page_height)
+
+        xmin = min(bounds[0] for bounds in content_bounds)
+        xmax = max(bounds[1] for bounds in content_bounds)
+        ymin = min(bounds[2] for bounds in content_bounds)
+        ymax = max(bounds[3] for bounds in content_bounds)
+
+        origin_x = xmin
+        origin_y = ymin
+        width = xmax - xmin
+        height = ymax - ymin
+
+        if raster_bbox is not None:
+            raster = self.raster_PIL
+            pixel_width, pixel_height = raster.size
+            left = max(0, int(math.floor(xmin * pixel_width / page_width)))
+            right = min(pixel_width, int(math.ceil(xmax * pixel_width / page_width)))
+            top = max(0, int(math.floor((page_height - ymax) * pixel_height / page_height)))
+            bottom = min(pixel_height, int(math.ceil((page_height - ymin) * pixel_height / page_height)))
+            if right > left and bottom > top:
+                self.raster_PIL = raster.crop((left, top, right, bottom))
+                origin_x = left * page_width / pixel_width
+                origin_y = page_height - bottom * page_height / pixel_height
+                width = (right - left) * page_width / pixel_width
+                height = (bottom - top) * page_height / pixel_height
+        else:
+            # Red/blue paths are removed from the raster source before it is
+            # rendered. Do not keep an empty white raster job for them.
+            self.raster_PIL = None
+
+        for line in self.lines:
+            line[0] -= origin_x
+            line[1] -= origin_y
+            line[2] -= origin_x
+            line[3] -= origin_y
+
+        return (width, height)
+
 
 ##    def open_cdr_file(self,filename):
 ##        #create OS temp folder
@@ -924,21 +999,8 @@ class SVG_READER(inkex.Effect):
 
 
         #################################################
-        xmin= 0.0
-        xmax=  w_mm
-        ymin= -h_mm
-        ymax= 0.0
         self.Make_PNG()
-
-        self.Xsize=xmax-xmin
-        self.Ysize=ymax-ymin
-        Xcorner=xmin
-        Ycorner=ymax
-        for ii in range(len(self.lines)):
-            self.lines[ii][0] = self.lines[ii][0]-Xcorner
-            self.lines[ii][1] = self.lines[ii][1]-Ycorner
-            self.lines[ii][2] = self.lines[ii][2]-Xcorner
-            self.lines[ii][3] = self.lines[ii][3]-Ycorner
+        self.Xsize, self.Ysize = self.normalize_content_bounds(w_mm, h_mm)
 
         self.cut_lines = []
         self.eng_lines = []
