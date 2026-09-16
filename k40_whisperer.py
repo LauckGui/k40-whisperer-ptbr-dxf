@@ -2527,7 +2527,7 @@ class Application(Frame):
         footer.pack(side=BOTTOM, fill=X)
         root_frame = Frame(dialog, padx=10, pady=10)
         root_frame.pack(fill=BOTH, expand=True)
-        controls = Frame(root_frame, width=225)
+        controls = Frame(root_frame, width=385)
         controls.pack(side=LEFT, fill=Y, padx=(0, 10))
         preview = Canvas(root_frame, background="#d1d5db", highlightthickness=1,
                          highlightbackground="#9ca3af")
@@ -2537,8 +2537,6 @@ class Application(Frame):
         geometry.pack(fill=X, pady=(0, 7))
         reference_box = LabelFrame(controls, text=" Referência e deslocamento ", padx=8, pady=7)
         reference_box.pack(fill=X, pady=(0, 7))
-        view_box = LabelFrame(controls, text=" Visualização ", padx=8, pady=7)
-        view_box.pack(fill=X, pady=(0, 7))
         raster_box = LabelFrame(controls, text=" Tratamento raster ", padx=8, pady=7)
         raster_box.pack(fill=X, pady=(0, 7))
         mask_box = LabelFrame(controls, text=" Máscara por vetor ", padx=8, pady=7)
@@ -2640,6 +2638,10 @@ class Application(Frame):
         row(geometry, 2, "Escala", scale_percent, "%", step=5.0)
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
             row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
+        Button(geometry, text="Ajustar à área", command=lambda: fit_view()).grid(
+            row=0, column=5, rowspan=2, sticky="nsew", padx=(10, 0), pady=(0, 3))
+        Button(geometry, text="Redefinir", command=lambda: reset_alignment()).grid(
+            row=2, column=5, rowspan=2, sticky="nsew", padx=(10, 0))
         Label(reference_box, text="Ponto zero e nudge").grid(
             row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
         grid_buttons = (
@@ -2656,15 +2658,15 @@ class Application(Frame):
         for row_index, column, icon, action in grid_buttons:
             Button(reference_box, image=icon, command=action).grid(
                 row=row_index, column=column, padx=1, pady=1, sticky="nsew")
-        Label(reference_box, text="X", anchor=W).grid(row=4, column=0, sticky=W, pady=(5, 0))
-        Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=4, column=1, sticky=EW, pady=(5, 0))
-        Label(reference_box, text="mm").grid(row=4, column=2, sticky=W, pady=(5, 0))
-        Label(reference_box, text="Y", anchor=W).grid(row=5, column=0, sticky=W, pady=2)
-        Entry(reference_box, textvariable=nudge_y, width=9, justify=RIGHT).grid(row=5, column=1, sticky=EW, pady=2)
-        Label(reference_box, text="mm").grid(row=5, column=2, sticky=W, pady=2)
-        Label(reference_box, text="Passo", anchor=W).grid(row=6, column=0, sticky=W, pady=(3, 0))
-        Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=6, column=1, sticky=EW, pady=(3, 0))
-        Label(reference_box, text="mm").grid(row=6, column=2, sticky=W, pady=(3, 0))
+        Label(reference_box, text="X", anchor=W).grid(row=1, column=3, sticky=W, padx=(12, 0))
+        Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=1, column=4, sticky=EW)
+        Label(reference_box, text="mm").grid(row=1, column=5, sticky=W)
+        Label(reference_box, text="Y", anchor=W).grid(row=2, column=3, sticky=W, padx=(12, 0))
+        Entry(reference_box, textvariable=nudge_y, width=9, justify=RIGHT).grid(row=2, column=4, sticky=EW)
+        Label(reference_box, text="mm").grid(row=2, column=5, sticky=W)
+        Label(reference_box, text="Passo", anchor=W).grid(row=3, column=3, sticky=W, padx=(12, 0))
+        Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=3, column=4, sticky=EW)
+        Label(reference_box, text="mm").grid(row=3, column=5, sticky=W)
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
             Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
@@ -2929,8 +2931,6 @@ class Application(Frame):
             self.menu_View_Refresh()
             dialog.destroy()
 
-        Button(view_box, text="Ajustar à área", command=fit_view).pack(fill=X, pady=(6, 0))
-        Button(view_box, text="Redefinir", command=reset_alignment).pack(fill=X, pady=(4, 0))
         def select_mask():
             mask_selecting[0] = True
             mask_status.set("Clique dentro do contorno fechado desejado")
