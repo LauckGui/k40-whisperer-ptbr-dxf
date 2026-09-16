@@ -212,6 +212,12 @@ class Application(Frame):
         elif name == "reload":
             draw.arc((p(3),p(3),p(21),p(21)), 35, 320, fill=color, width=width)
             draw.polygon(((p(18),p(2)),(p(23),p(3)),(p(20),p(8))), fill=color)
+        elif name == "gear":
+            draw.ellipse((p(5),p(5),p(19),p(19)), fill=color)
+            draw.ellipse((p(10),p(10),p(14),p(14)), fill="white")
+            for box in ((p(10),p(1),p(14),p(7)), (p(10),p(17),p(14),p(23)),
+                        (p(1),p(10),p(7),p(14)), (p(17),p(10),p(23),p(14))):
+                draw.rectangle(box, fill=color)
         elif name == "copies":
             draw.rounded_rectangle((p(3),p(3),p(15),p(15)), radius=p(1),
                                    outline=color, width=width)
@@ -420,6 +426,7 @@ class Application(Frame):
         self.raster_gamma = StringVar()
         self.raster_dither_method = StringVar()
         self.last_open_directory = StringVar()
+        self.language = StringVar()
         self.Reng_feed  = StringVar()
         self.Veng_feed  = StringVar()
         self.Vcut_feed  = StringVar()
@@ -538,6 +545,7 @@ class Application(Frame):
         self.raster_contrast.set("1.0")
         self.raster_gamma.set("1.0")
         self.raster_dither_method.set("Limiar")
+        self.language.set("pt-BR")
 
         self.Reng_feed.set("100")
         self.Veng_feed.set("20")
@@ -912,6 +920,7 @@ class Application(Frame):
             "plug_green": self.make_ui_icon("plug", 20, "#16a34a"),
             "folder": self.make_ui_icon("folder", 20),
             "reload": self.make_ui_icon("reload", 20),
+            "gear": self.make_ui_icon("gear", 20),
             "copies": self.make_ui_icon("copies", 20),
             "transform": self.make_ui_icon("transform", 20),
             "image": self.make_ui_icon("image", 20),
@@ -973,6 +982,10 @@ class Application(Frame):
         trace_variable(self.gotoY, self.Entry_GoToY_Callback)
         self.Entry_GoToX.bind("<FocusOut>", self.Format_Position_Entries)
         self.Entry_GoToY.bind("<FocusOut>", self.Format_Position_Entries)
+        self.Entry_GoToX.bind("<Return>", self.GoTo)
+        self.Entry_GoToY.bind("<Return>", self.GoTo)
+        self.Entry_GoToX.bind("<KP_Enter>", self.GoTo)
+        self.Entry_GoToY.bind("<KP_Enter>", self.GoTo)
         self.master.after(300, self.Refresh_Connection_Detection)
         
         self.Label_GoToX   = Label(self.master,text="X", anchor=CENTER )
@@ -1084,95 +1097,7 @@ class Application(Frame):
         
 
 
-        top_File = Menu(self.menuBar, tearoff=0)
-        top_File.add("command", label = "Salvar configurações agora", command = self.Save_Auto_Configuration)
-        top_File.add("command", label = "Importar configurações legadas", command = self.menu_File_Open_Settings_File)
-
-        top_File.add_separator()
-        top_File.add("command", label = "Abrir desenho (SVG/DXF/G-code)", command = self.menu_File_Open_Design)
-        top_File.add("command", label = "Recarregar desenho", command = self.menu_Reload_Design)
-
-        top_File.add_separator()    
-        top_File.add("command", label = "Enviar arquivo EGV para a laser", command = self.menu_File_Open_EGV)
-
-        SaveEGVmenu = Menu(self.master, relief = "raised", bd=2, tearoff=0)
-        top_File.add_cascade(label="Salvar arquivo EGV", menu=SaveEGVmenu)        
-        SaveEGVmenu.add("command", label = "Gravação raster", command = self.menu_File_Raster_Engrave)
-        SaveEGVmenu.add("command", label = "Gravação vetorial", command = self.menu_File_Vector_Engrave)
-        SaveEGVmenu.add("command", label = "Corte vetorial", command = self.menu_File_Vector_Cut)
-        SaveEGVmenu.add("command", label = "Operações G-code", command = self.menu_File_G_Code)
-        SaveEGVmenu.add_separator()   
-        SaveEGVmenu.add("command", label = "Gravação raster e vetorial", command = self.menu_File_Raster_Vector_Engrave)
-        SaveEGVmenu.add("command", label = "Gravação e corte vetorial", command = self.menu_File_Vector_Engrave_Cut)
-        SaveEGVmenu.add("command", label = "Gravação raster, vetorial e corte vetorial", command = self.menu_File_Raster_Vector_Cut)
-        
-    
-        top_File.add_separator()
-        top_File.add("command", label = "Sair", command = self.menu_File_Quit)
-        
-        self.menuBar.add("cascade", label="Arquivo", menu=top_File)
-
-        #top_Edit = Menu(self.menuBar, tearoff=0)
-        #self.menuBar.add("cascade", label="Edit", menu=top_Edit)
-
-        top_View = Menu(self.menuBar, tearoff=0)
-        top_View.add("command", label = "Atualizar   <F5>", command = self.menu_View_Refresh)
-        top_View.add_separator()
-        top_View.add_checkbutton(label = "Mostrar imagem raster", variable=self.include_Reng ,command= self.menu_View_Refresh)
-        if DEBUG:
-            top_View.add_checkbutton(label = "Mostrar trajetórias raster", variable=self.include_Rpth ,command= self.menu_View_Refresh)
-        
-        top_View.add_checkbutton(label = "Mostrar gravação vetorial", variable=self.include_Veng ,command= self.menu_View_Refresh)
-        top_View.add_checkbutton(label = "Mostrar corte vetorial", variable=self.include_Vcut ,command= self.menu_View_Refresh)
-        top_View.add_checkbutton(label = "Mostrar trajetórias G-code", variable=self.include_Gcde ,command= self.menu_View_Refresh)
-        top_View.add_separator()
-        top_View.add_checkbutton(label = "Ajustar zoom ao desenho", variable=self.zoom2image ,command= self.menu_View_Refresh)
-
-        #top_View.add_separator()
-        #top_View.add("command", label = "computeAccurateReng",command= self.computeAccurateReng)
-        #top_View.add("command", label = "computeAccurateVeng",command= self.computeAccurateVeng)
-        #top_View.add("command", label = "computeAccurateVcut",command= self.computeAccurateVcut)
-
-        self.menuBar.add("cascade", label="Visualizar", menu=top_View)
-
-        top_Tools = Menu(self.menuBar, tearoff=0)
-        self.menuBar.add("cascade", label="Ferramentas", menu=top_Tools)
-        USBmenu = Menu(self.master, relief = "raised", bd=2, tearoff=0)
-          
-        top_Tools.add("command", label = "Calcular tempo do raster", command = self.menu_Calc_Raster_Time)
-        top_Tools.add("command", label = "Contornar limite do desenho <Ctrl-t>", command = self.TRACE_Settings_Window)
-        top_Tools.add_separator()
-        top_Tools.add("command", label = "Conectar laser <Ctrl-i>", command = self.Initialize_Laser)
-        top_Tools.add("command", label = "Destravar laser <Ctrl-f>", command = self.Unfreeze_Laser)
-        top_Tools.add_cascade(label="USB", menu=USBmenu)
-        USBmenu.add("command", label = "Redefinir USB", command = self.Reset)
-        USBmenu.add("command", label = "Liberar USB", command = self.Release_USB)
-
-                    
-
-        #top_USB = Menu(self.menuBar, tearoff=0)
-        #top_USB.add("command", label = "Reset USB", command = self.Reset)
-        #top_USB.add("command", label = "Release USB", command = self.Release_USB)
-        #top_USB.add("command", label = "Initialize Laser", command = self.Initialize_Laser)
-        #self.menuBar.add("cascade", label="USB", menu=top_USB)
-        
-
-        top_Settings = Menu(self.menuBar, tearoff=0)
-        top_Settings.add("command", label = "Geral e máquina <F2>", command = self.GEN_Settings_Window)
-        top_Settings.add("command", label = "Raster <F3>", command = self.RASTER_Settings_Window)
-        top_Settings.add("command", label = "Rotativo <F4>", command = self.ROTARY_Settings_Window)
-        top_Settings.add_separator()
-        top_Settings.add("command", label = "Trabalho e desenho <F6>", command = self.JOB_Settings_Window)
-        top_Settings.add_separator()
-        top_Settings.add("command", label = "Resetar configurações", command = self.Reset_Configuration)
-        
-        self.menuBar.add("cascade", label="Configurações", menu=top_Settings)
-        
-        top_Help = Menu(self.menuBar, tearoff=0)
-        top_Help.add("command", label = "Sobre (e-mail)", command = self.menu_Help_About)
-        top_Help.add("command", label = "Site do K40 Whisperer", command = self.menu_Help_Web)
-        top_Help.add("command", label = "Manual (site)", command = self.menu_Help_Manual)
-        self.menuBar.add("cascade", label="Ajuda", menu=top_Help)
+        self._build_main_menus()
 
         self.master.config(menu=self.menuBar)
 
@@ -1258,6 +1183,119 @@ class Application(Frame):
             return 0
         return 1
 
+    def _build_main_menus(self):
+        """Build the compact menu bar in the selected interface language."""
+        english = self.language.get() == "en"
+        tr = lambda pt, en: en if english else pt
+        self.menuBar.delete(0, END)
+
+        file_menu = Menu(self.menuBar, tearoff=0)
+        file_menu.add_command(label=tr("Recarregar desenho <Ctrl-l>", "Reload design <Ctrl-l>"),
+                              command=self.menu_Reload_Design)
+        egv_menu = Menu(file_menu, tearoff=0)
+        egv_menu.add_command(label=tr("Enviar para a laser", "Send to laser"), command=self.menu_File_Open_EGV)
+        save_egv = Menu(egv_menu, tearoff=0)
+        for pt, en, command in (
+            ("Gravação raster", "Raster engraving", self.menu_File_Raster_Engrave),
+            ("Gravação vetorial", "Vector engraving", self.menu_File_Vector_Engrave),
+            ("Corte vetorial", "Vector cutting", self.menu_File_Vector_Cut),
+            ("Operações G-code", "G-code operations", self.menu_File_G_Code),
+            ("Raster e vetor", "Raster and vector", self.menu_File_Raster_Vector_Engrave),
+            ("Gravação e corte vetorial", "Vector engraving and cutting", self.menu_File_Vector_Engrave_Cut),
+            ("Raster, gravação e corte", "Raster, engraving and cutting", self.menu_File_Raster_Vector_Cut),
+        ):
+            save_egv.add_command(label=tr(pt, en), command=command)
+        egv_menu.add_cascade(label=tr("Salvar arquivo EGV", "Save EGV file"), menu=save_egv)
+        file_menu.add_cascade(label="EGV", menu=egv_menu)
+        file_menu.add_separator()
+        file_menu.add_command(label=tr("Sair", "Exit"), command=self.menu_File_Quit)
+        self.menuBar.add_cascade(label=tr("Arquivo", "File"), menu=file_menu)
+
+        view_menu = Menu(self.menuBar, tearoff=0)
+        view_menu.add_command(label=tr("Atualizar <F5>", "Refresh <F5>"), command=self.menu_View_Refresh)
+        layers = Menu(view_menu, tearoff=0)
+        layers.add_checkbutton(label=tr("Imagem raster", "Raster image"), variable=self.include_Reng,
+                               command=self.menu_View_Refresh)
+        if DEBUG:
+            layers.add_checkbutton(label=tr("Trajetórias raster", "Raster paths"), variable=self.include_Rpth,
+                                   command=self.menu_View_Refresh)
+        layers.add_checkbutton(label=tr("Gravação vetorial", "Vector engraving"), variable=self.include_Veng,
+                               command=self.menu_View_Refresh)
+        layers.add_checkbutton(label=tr("Corte vetorial", "Vector cutting"), variable=self.include_Vcut,
+                               command=self.menu_View_Refresh)
+        layers.add_checkbutton(label=tr("Trajetórias G-code", "G-code paths"), variable=self.include_Gcde,
+                               command=self.menu_View_Refresh)
+        view_menu.add_cascade(label=tr("Camadas", "Layers"), menu=layers)
+        view_menu.add_checkbutton(label=tr("Ajustar zoom ao desenho", "Fit zoom to design"),
+                                  variable=self.zoom2image, command=self.menu_View_Refresh)
+        self.menuBar.add_cascade(label=tr("Visualizar", "View"), menu=view_menu)
+
+        tools_menu = Menu(self.menuBar, tearoff=0)
+        tools_menu.add_command(label=tr("Contornar limite <Ctrl-t>", "Trace boundary <Ctrl-t>"),
+                               command=self.TRACE_Settings_Window)
+        usb_menu = Menu(tools_menu, tearoff=0)
+        usb_menu.add_command(label=tr("Redefinir USB", "Reset USB"), command=self.Reset)
+        usb_menu.add_command(label=tr("Liberar USB", "Release USB"), command=self.Release_USB)
+        tools_menu.add_cascade(label="USB", menu=usb_menu)
+        self.menuBar.add_cascade(label=tr("Ferramentas", "Tools"), menu=tools_menu)
+
+        settings_menu = Menu(self.menuBar, tearoff=0)
+        settings_menu.add_command(label=tr("Geral e máquina <F2>", "General and machine <F2>"),
+                                  command=self.GEN_Settings_Window)
+        settings_menu.add_command(label=tr("Rotativo <F4>", "Rotary <F4>"), command=self.ROTARY_Settings_Window)
+        settings_menu.add_command(label=tr("Trabalho e desenho <F6>", "Job and design <F6>"),
+                                  command=self.JOB_Settings_Window)
+        presets = Menu(settings_menu, tearoff=0)
+        presets.add_command(label=tr("Salvar agora", "Save now"), command=self.Save_Auto_Configuration)
+        presets.add_command(label=tr("Importar configuração legada", "Import legacy settings"),
+                            command=self.menu_File_Open_Settings_File)
+        presets.add_separator()
+        presets.add_command(label=tr("Restaurar padrões", "Restore defaults"), command=self.Reset_Configuration)
+        settings_menu.add_cascade(label=tr("Predefinições", "Presets"), menu=presets)
+        language_menu = Menu(settings_menu, tearoff=0)
+        language_menu.add_radiobutton(label="Português (Brasil)", variable=self.language,
+                                      value="pt-BR", command=self._apply_interface_language)
+        language_menu.add_radiobutton(label="English", variable=self.language,
+                                      value="en", command=self._apply_interface_language)
+        settings_menu.add_cascade(label=tr("Idioma", "Language"), menu=language_menu)
+        self.menuBar.add_cascade(label=tr("Configurações", "Settings"), menu=settings_menu)
+
+        help_menu = Menu(self.menuBar, tearoff=0)
+        help_menu.add_command(label=tr("Sobre", "About"), command=self.menu_Help_About)
+        help_menu.add_command(label=tr("Site do K40 Whisperer", "K40 Whisperer website"), command=self.menu_Help_Web)
+        help_menu.add_command(label=tr("Manual", "Manual"), command=self.menu_Help_Manual)
+        self.menuBar.add_cascade(label=tr("Ajuda", "Help"), menu=help_menu)
+
+    def _apply_interface_language(self):
+        """Apply language immediately to menus and primary action buttons."""
+        self._build_main_menus()
+        english = self.language.get() == "en"
+        tr = lambda pt, en: en if english else pt
+        self.Initialize_Button.configure(text=tr("Conectar Laser", "Connect Laser"))
+        self.Open_Button.configure(text=tr("Abrir Vetor", "Open Vector"))
+        self.Edit_Button.configure(text=tr("Editar Vetor", "Edit Vector"))
+        self.Import_Image_Button.configure(text=tr("Abrir Imagem", "Open Image"))
+        self.Align_Image_Button.configure(text=tr("Editar Imagem", "Edit Image"))
+        self.Array_Button.configure(text=tr("Múltiplas Cópias", "Multiple Copies"))
+        self.Label_Position_Control.configure(text=tr("Controles de posição:", "Position controls:"))
+        self.Label_Current_Position.configure(text=tr("Posição atual:", "Current position:"))
+        self.Label_Step.configure(text=tr("Passo", "Step"))
+        self.Home_Button.configure(text=tr("Origem", "Home"))
+        self.UnLock_Button.configure(text=tr("Liberar eixos", "Unlock axes"))
+        self.Reng_Button.configure(text=tr("Rasterizar", "Raster"))
+        self.Veng_Button.configure(text=tr("Gravar", "Engrave"))
+        self.Vcut_Button.configure(text=tr("Cortar", "Cut"))
+        self.Header_Process.configure(text=tr("Processo", "Process"))
+        self.Header_Enabled.configure(text=tr("Ativo", "Enabled"))
+        self.Header_Speed.configure(text=tr("Velocidade", "Speed"))
+        self.Header_Power.configure(text=tr("Potência", "Power"))
+        self.Header_Passes.configure(text=tr("Passadas", "Passes"))
+        self.Header_Color.configure(text=tr("Cor", "Color"))
+        self.Gcode_Speed_Display.configure(text=tr("do arquivo", "from file"))
+        self.Run_Button.configure(text=tr("Rodar", "Run"))
+        self.Pause_Button.configure(text=tr("Pausar", "Pause"))
+        self.Stop_Button.configure(text=tr("Parar", "Stop"))
+
 ################################################################################
     def _configuration_variables(self):
         names = (
@@ -1272,7 +1310,7 @@ class Application(Frame):
             "Vcut_power", "Gcode_power", "Trace_power", "max_power",
             "Reng_passes", "Veng_passes", "Vcut_passes", "Gcde_passes",
             "rast_step", "ht_size", "raster_brightness", "raster_contrast",
-            "raster_gamma", "raster_dither_method", "last_open_directory",
+            "raster_gamma", "raster_dither_method", "last_open_directory", "language",
             "jog_step", "board_name", "units",
             "LaserXsize", "LaserYsize", "LaserXscale", "LaserYscale",
             "LaserRscale", "rapid_feed", "bezier_M1", "bezier_M2",
@@ -1315,6 +1353,8 @@ class Application(Frame):
                         pass
                 variable.set(value)
         self.include_Time.set(1)
+        if hasattr(self, "menuBar"):
+            self._apply_interface_language()
 
     def _load_auto_configuration(self):
         try:
@@ -2808,7 +2848,9 @@ class Application(Frame):
             raster_box, textvariable=self.raster_dither_method, state="readonly",
             values=("Limiar", "Halftone", "Floyd–Steinberg", "Atkinson",
                     "Jarvis–Judice–Ninke", "Bayer 8×8"), width=22)
-        algorithm_selector.grid(row=0, column=1, columnspan=4, sticky=EW, pady=(0, 3))
+        algorithm_selector.grid(row=0, column=1, columnspan=3, sticky=EW, pady=(0, 3))
+        Button(raster_box, image=self.ui_icons["gear"], command=self.RASTER_Settings_Window,
+               padx=2, pady=1).grid(row=0, column=4, sticky=E, padx=(4, 0), pady=(0, 3))
         raster_row(1, "Brilho", self.raster_brightness, -100, 100, 1)
         raster_row(2, "Contraste", self.raster_contrast, .1, 3.0, .1)
         raster_row(3, "Gama", self.raster_gamma, .1, 3.0, .1)
@@ -5474,7 +5516,9 @@ class Application(Frame):
         self.pos_offset = [0.0,0.0]
         self.menu_View_Refresh()
 
-    def GoTo(self):
+    def GoTo(self, event=None):
+        if self.Entry_GoToX_Check() != 0 or self.Entry_GoToY_Check() != 0:
+            return "break" if event is not None else None
         target_x = float(self.gotoX.get())/self.units_scale
         target_y = float(self.gotoY.get())/self.units_scale
         origin_x, origin_y = origin_for_reference(
@@ -5491,7 +5535,9 @@ class Application(Frame):
         self.laserX  = 0.0
         self.laserY  = 0.0
         self.Rapid_Move(xpos,ypos)
-        self.menu_View_Refresh()  
+        self.menu_View_Refresh()
+        self.Format_Position_Entries()
+        return "break" if event is not None else None
         
     def Reset(self):
         if self.k40 != None:
@@ -5735,6 +5781,8 @@ class Application(Frame):
 
         self.currentX.set("%.3f" % X_display)
         self.currentY.set("%.3f" % Y_display)
+        self.gotoX.set("%.3f" % X_display)
+        self.gotoY.set("%.3f" % Y_display)
 
         self.statusMessage.set(" Posição atual: X=%.3f Y=%.3f    ( L x A )=( %.3f%s x %.3f%s ) "
                                 %(X_display,
@@ -5992,29 +6040,29 @@ class Application(Frame):
                     compact_gap=2
                     self.Label_Current_Position.place(x=command_x, y=jog_top,
                                                         width=command_label_w, height=compact_button_h)
-                    self.Display_CurrentX.place(x=command_x+command_label_w, y=jog_top,
-                                                width=command_entry_w, height=compact_button_h)
-                    self.Display_CurrentY.place(x=command_x+command_label_w+57, y=jog_top,
-                                                width=command_entry_w, height=compact_button_h)
+                    self.Display_CurrentX.place_forget()
+                    self.Display_CurrentY.place_forget()
+                    self.Entry_GoToX.place(x=command_x+command_label_w, y=jog_top,
+                                           width=command_entry_w, height=compact_button_h)
+                    self.Entry_GoToY.place(x=command_x+command_label_w+57, y=jog_top,
+                                           width=command_entry_w, height=compact_button_h)
 
                     command_row=compact_button_h+compact_gap
-                    self.GoTo_Button.place(x=command_x, y=jog_top+command_row,
-                                           width=command_label_w, height=compact_button_h)
-                    self.Entry_GoToX.place(x=command_x+command_label_w, y=jog_top+command_row,
-                                           width=command_entry_w, height=compact_button_h)
-                    self.Entry_GoToY.place(x=command_x+command_label_w+57, y=jog_top+command_row,
-                                           width=command_entry_w, height=compact_button_h)
+                    self.GoTo_Button.place_forget()
+                    self.Label_Step.place(x=command_x, y=jog_top+command_row,
+                                          width=command_label_w, height=compact_button_h)
+                    self.Entry_Step.place(x=command_x+command_label_w, y=jog_top+command_row,
+                                          width=command_entry_w, height=compact_button_h)
+                    self.Label_Step_u.place(x=command_x+command_label_w+57,
+                                            y=jog_top+command_row,
+                                            width=command_entry_w, height=compact_button_h)
                     self.Home_Button.place(x=command_x, y=jog_top+command_row*2,
                                            width=command_w, height=compact_button_h)
                     self.UnLock_Button.place(x=command_x, y=jog_top+command_row*3,
                                              width=command_w, height=compact_button_h+2)
 
-                    # O passo pertence ao JOG e fica imediatamente abaixo dele.
                     jog_bottom = jog_top + bsz*3
-                    self.Label_Step.place(x=12, y=jog_bottom+7, width=42, height=23)
-                    self.Entry_Step.place(x=54, y=jog_bottom+7, width=52, height=23)
-                    self.Label_Step_u.place_forget()
-                    self.separator2.place(x=8, y=jog_bottom+37, width=334, height=1)
+                    self.separator2.place(x=8, y=jog_bottom+7, width=334, height=1)
                     self.Label_GoToX.place_forget()
                     self.Label_GoToY.place_forget()
                     ###########################################################################
@@ -6576,10 +6624,11 @@ class Application(Frame):
                     x, visible_top, x, visible_top-(9 if value else ruler_h),
                     fill=color, tags="Ruler"
                 )
-                self.PreviewCanvas.create_text(
-                    x+2, ruler_top+2, text=("%g" % value), anchor="nw",
-                    fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
-                )
+                if value != 0:
+                    self.PreviewCanvas.create_text(
+                        x+2, ruler_top+2, text=("%g" % value), anchor="nw",
+                        fill=label_color, font=("TkDefaultFont", 7), tags="Ruler"
+                    )
 
         for value in ruler_values(height):
             fraction = value/height if height else 0.0
