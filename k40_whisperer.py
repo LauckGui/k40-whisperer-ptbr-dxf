@@ -2487,6 +2487,7 @@ class Application(Frame):
         usable_height = max(520, dialog.winfo_screenheight()-120)
         dialog.geometry("940x%d" % min(700, usable_height))
         dialog.minsize(760, 520)
+        dialog.state("zoomed")
         dialog.transient(self.master)
         dialog.grab_set()
 
@@ -2511,6 +2512,7 @@ class Application(Frame):
         synchronizing = [False]
         mask_selecting = [False]
         selected_mask = [saved_alignment.get("mask_points")]
+        mask_apply_button = [None]
 
         def vector_frame():
             """Return the actual vector bounds, never the expanded raster page."""
@@ -2705,7 +2707,9 @@ class Application(Frame):
         raster_row(1, "Contraste", self.raster_contrast, .1, 3.0, .1)
         raster_row(2, "Gama", self.raster_gamma, .1, 3.0, .1)
         Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
-            row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
+            row=3, column=0, columnspan=3, sticky=W, pady=(4, 0))
+        Button(raster_box, text="Redefinir", command=reset_raster_treatment).grid(
+            row=3, column=3, columnspan=2, sticky=EW, pady=(4, 0))
         Label(raster_box, text="Algoritmo", anchor=W).grid(row=4, column=0, sticky=W, pady=(5, 0))
         algorithm_selector = ttk.Combobox(
             raster_box, textvariable=self.raster_dither_method, state="readonly",
@@ -2713,10 +2717,33 @@ class Application(Frame):
                     "Jarvis–Judice–Ninke", "Bayer 8×8"), width=22)
         algorithm_selector.grid(row=4, column=1, columnspan=4, sticky=EW, pady=(5, 0))
         preview_dither = [False]
-        Button(raster_box, text="Redefinir", command=reset_raster_treatment).grid(
-            row=5, column=0, columnspan=5, sticky=EW, pady=(4, 0))
 
-        mask_status = StringVar(value="Nenhuma borda selecionada")
+        algorithm_help = {
+            "Limiar": "Preto e branco direto; é o método mais rápido.",
+            "Halftone": "Usa o padrão de meio-tom configurado no raster.",
+            "Floyd–Steinberg": "Difusão equilibrada, boa opção geral para fotografias.",
+            "Atkinson": "Pontilhado mais leve, preserva detalhes claros.",
+            "Jarvis–Judice–Ninke": "Difusão suave, com maior detalhe e processamento.",
+            "Bayer 8×8": "Padrão regular e rápido; adequado para superfícies homogêneas.",
+        }
+        algorithm_tooltip = [None]
+        def show_algorithm_tooltip(event):
+            hide_algorithm_tooltip()
+            tip = Toplevel(dialog)
+            tip.wm_overrideredirect(True)
+            Label(tip, text=algorithm_help.get(self.raster_dither_method.get(), ""),
+                  justify=LEFT, padx=6, pady=4, bg="#fff8c5", relief=SOLID, borderwidth=1).pack()
+            tip.wm_geometry("+%d+%d" % (event.x_root + 12, event.y_root + 18))
+            algorithm_tooltip[0] = tip
+        def hide_algorithm_tooltip(event=None):
+            if algorithm_tooltip[0] is not None:
+                algorithm_tooltip[0].destroy()
+                algorithm_tooltip[0] = None
+        algorithm_selector.bind("<Enter>", show_algorithm_tooltip)
+        algorithm_selector.bind("<Leave>", hide_algorithm_tooltip)
+
+        mask_status = StringVar(value=("Borda selecionada" if selected_mask[0]
+                                       else "Nenhuma borda selecionada"))
         Label(mask_box, textvariable=mask_status, anchor=W, fg="#4b5563").pack(fill=X)
 
         def closed_vector_loops(xmin, ymax):
@@ -2782,6 +2809,12 @@ class Application(Frame):
                 if preview_dither[0] and self.raster_dither_method.get() != "Halftone":
                     shown = dither_image(shown, self.raster_dither_method.get())
                 shown = shown.convert("RGBA").resize(target_size, Image.LANCZOS)
+                if selected_mask[0]:
+                    mask = Image.new("L", target_size, 0)
+                    ImageDraw.Draw(mask).polygon(
+                        [((x-ix)*fit, (y-iy)*fit) for x, y in selected_mask[0]], fill=255)
+                    shown.putalpha(Image.composite(
+                        shown.getchannel("A"), Image.new("L", target_size, 0), mask))
             except Exception:
                 shown = image.resize(target_size, Image.LANCZOS)
             preview_photo[0] = ImageTk.PhotoImage(shown)
@@ -2830,8 +2863,8 @@ class Application(Frame):
                 pad = max(8.0, max(width, height, vector_w, vector_h)*.12)
                 min_x, max_x = min(-pad, ix-pad), max(vector_w+pad, ix+width+pad)
                 min_y, max_y = min(-pad, iy-pad), max(vector_h+pad, iy+height+pad)
-                px = event.x/max(.001, preview_scale[0])+min_x
-                py = event.y/max(.001, preview_scale[0])+min_y
+                px = (event.x-pan[0])/max(.001, preview_scale[0])+min_x
+                py = (event.y-pan[1])/max(.001, preview_scale[0])+min_y
                 def inside(point, polygon):
                     odd = False
                     for index, current in enumerate(polygon):
@@ -2846,6 +2879,8 @@ class Application(Frame):
                         selected_mask[0] = loop
                         mask_status.set("Borda selecionada")
                         mask_selecting[0] = False
+                        if mask_apply_button[0] is not None:
+                            mask_apply_button[0].configure(state=NORMAL)
                         draw_preview()
                         return
                 mask_status.set("Clique dentro de um contorno fechado")
@@ -2945,6 +2980,8 @@ class Application(Frame):
             selected_mask[0] = None
             mask_selecting[0] = False
             mask_status.set("Nenhuma borda selecionada")
+            if mask_apply_button[0] is not None:
+                mask_apply_button[0].configure(state=DISABLED)
             draw_preview()
         def confirm_mask():
             if selected_mask[0]:
@@ -2953,7 +2990,9 @@ class Application(Frame):
             else:
                 mask_status.set("Selecione uma borda antes de aplicar")
         Button(mask_box, text="Selecionar borda", command=select_mask).pack(side=LEFT, pady=(5, 0))
-        Button(mask_box, text="Aplicar máscara", command=confirm_mask).pack(side=LEFT, padx=4, pady=(5, 0))
+        mask_apply_button[0] = Button(mask_box, text="Aplicar máscara", command=confirm_mask,
+                                      state=NORMAL if selected_mask[0] else DISABLED)
+        mask_apply_button[0].pack(side=LEFT, padx=4, pady=(5, 0))
         Button(mask_box, text="Remover", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
         Button(footer, text="Aplicar", command=apply_image).pack(side=LEFT, padx=(0, 6))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=LEFT)
