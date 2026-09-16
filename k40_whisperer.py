@@ -2512,7 +2512,6 @@ class Application(Frame):
         synchronizing = [False]
         mask_selecting = [False]
         selected_mask = [saved_alignment.get("mask_points")]
-        mask_apply_button = [None]
 
         def vector_frame():
             """Return the actual vector bounds, never the expanded raster page."""
@@ -2678,7 +2677,9 @@ class Application(Frame):
             (3, 2, self.LR_image, lambda: change_reference("Inferior direito")),
         )
         for row_index, column, icon, action in grid_buttons:
-            Button(reference_box, image=icon, command=action).grid(
+            # Explicit dimensions keep the 3×3 control grid square even when
+            # the neighbouring fields request taller rows.
+            Button(reference_box, image=icon, width=20, height=20, command=action).grid(
                 row=row_index, column=column, padx=1, pady=1, sticky="nsew")
         Label(reference_box, text="X", anchor=W).grid(row=1, column=3, sticky=W, padx=(12, 0))
         Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=1, column=4, sticky=EW)
@@ -2726,27 +2727,33 @@ class Application(Frame):
             "Jarvis–Judice–Ninke": "Difusão suave, com maior detalhe e processamento.",
             "Bayer 8×8": "Padrão regular e rápido; adequado para superfícies homogêneas.",
         }
-        algorithm_tooltip = [None]
+        algorithm_tooltip = [None, None]
         def show_algorithm_tooltip(text, x_root, y_root):
-            hide_algorithm_tooltip()
-            tip = Toplevel(dialog)
-            tip.wm_overrideredirect(True)
-            Label(tip, text=text,
-                  justify=LEFT, padx=6, pady=4, bg="#fff8c5", relief=SOLID, borderwidth=1).pack()
-            tip.wm_geometry("+%d+%d" % (x_root + 12, y_root + 18))
-            algorithm_tooltip[0] = tip
+            if algorithm_tooltip[0] is None:
+                tip = Toplevel(dialog)
+                tip.wm_overrideredirect(True)
+                label = Label(tip, justify=LEFT, padx=6, pady=4, bg="#fff8c5",
+                              relief=SOLID, borderwidth=1)
+                label.pack()
+                algorithm_tooltip[:] = [tip, label]
+            algorithm_tooltip[1].configure(text=text)
+            # Keep the explanation to the right of the selection list, so it
+            # does not cover an option or trigger enter/leave flicker.
+            algorithm_tooltip[0].wm_geometry("+%d+%d" % (x_root, y_root))
         def hide_algorithm_tooltip(event=None):
             if algorithm_tooltip[0] is not None:
                 algorithm_tooltip[0].destroy()
-                algorithm_tooltip[0] = None
+                algorithm_tooltip[:] = [None, None]
         def show_current_algorithm_tooltip(event):
             show_algorithm_tooltip(algorithm_help.get(self.raster_dither_method.get(), ""),
-                                   event.x_root, event.y_root)
+                                   algorithm_selector.winfo_rootx() + algorithm_selector.winfo_width() + 10,
+                                   algorithm_selector.winfo_rooty())
         def show_algorithm_menu_tooltip(widget, x, y):
             try:
                 index = int(dialog.tk.call(widget, "nearest", y))
                 value = dialog.tk.call(widget, "get", index)
-                root_x = int(dialog.tk.call("winfo", "rootx", widget)) + int(x)
+                root_x = (int(dialog.tk.call("winfo", "rootx", widget)) +
+                          int(dialog.tk.call("winfo", "width", widget)) + 10)
                 root_y = int(dialog.tk.call("winfo", "rooty", widget)) + int(y)
                 show_algorithm_tooltip(algorithm_help.get(value, ""), root_x, root_y)
             except Exception:
@@ -2903,8 +2910,6 @@ class Application(Frame):
                         selected_mask[0] = loop
                         mask_status.set("Borda selecionada")
                         mask_selecting[0] = False
-                        if mask_apply_button[0] is not None:
-                            mask_apply_button[0].configure(state=NORMAL)
                         draw_preview()
                         return
                 mask_status.set("Clique dentro de um contorno fechado")
@@ -3004,20 +3009,9 @@ class Application(Frame):
             selected_mask[0] = None
             mask_selecting[0] = False
             mask_status.set("Nenhuma borda selecionada")
-            if mask_apply_button[0] is not None:
-                mask_apply_button[0].configure(state=DISABLED)
             draw_preview()
-        def confirm_mask():
-            if selected_mask[0]:
-                mask_status.set("Máscara pronta para aplicar")
-                draw_preview()
-            else:
-                mask_status.set("Selecione uma borda antes de aplicar")
         Button(mask_box, text="Selecionar borda", command=select_mask).pack(side=LEFT, pady=(5, 0))
-        mask_apply_button[0] = Button(mask_box, text="Aplicar máscara", command=confirm_mask,
-                                      state=NORMAL if selected_mask[0] else DISABLED)
-        mask_apply_button[0].pack(side=LEFT, padx=4, pady=(5, 0))
-        Button(mask_box, text="Remover", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
+        Button(mask_box, text="Remover máscara", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
         Button(footer, text="Aplicar", command=apply_image).pack(side=LEFT, padx=(0, 6))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=LEFT)
         trace_variable(width_mm, sync_from_width)
