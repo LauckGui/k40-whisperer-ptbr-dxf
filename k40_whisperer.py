@@ -176,6 +176,7 @@ class Application(Frame):
         self.source_raster_dpi = 0.0
         self.imported_image_source = None
         self.imported_image_filename = None
+        self.image_alignment = None
         #if self.HomeUR.get():
         self.move_head_window_temporary([0.0,0.0])
         #else:
@@ -2455,6 +2456,7 @@ class Application(Frame):
             with Image.open(filename) as image:
                 self.imported_image_source = image.convert("RGBA").copy()
             self.imported_image_filename = filename
+            self.image_alignment = None
             self.Align_Image_Button.configure(state=NORMAL)
             self.IMAGE_ALIGNMENT_Window()
         except Exception as exc:
@@ -2481,13 +2483,14 @@ class Application(Frame):
         image = self.imported_image_source
         default_width = max(1.0, image.width / 254.0 * 25.4)
         default_height = max(1.0, image.height / 254.0 * 25.4)
-        width_mm = StringVar(value="%.3f" % default_width)
-        height_mm = StringVar(value="%.3f" % default_height)
-        scale_percent = StringVar(value="100")
-        nudge_x = StringVar(value="0")
-        nudge_y = StringVar(value="0")
-        nudge_step = StringVar(value="1.0")
-        reference = StringVar(value="Centro")
+        saved_alignment = self.image_alignment or {}
+        width_mm = StringVar(value="%.3f" % saved_alignment.get("width_mm", default_width))
+        height_mm = StringVar(value="%.3f" % saved_alignment.get("height_mm", default_height))
+        scale_percent = StringVar(value="%.3f" % saved_alignment.get("scale_percent", 100.0))
+        nudge_x = StringVar(value="%.3f" % saved_alignment.get("nudge_x", 0.0))
+        nudge_y = StringVar(value="%.3f" % saved_alignment.get("nudge_y", 0.0))
+        nudge_step = StringVar(value="%.3f" % saved_alignment.get("nudge_step", 1.0))
+        reference = StringVar(value=saved_alignment.get("reference", "Centro"))
         keep_ratio = BooleanVar(value=True)
         zoom = [1.0]
         pan = [0, 0]
@@ -2773,6 +2776,15 @@ class Application(Frame):
             self.wim, self.him = composed.size
             self.aspect_ratio = float(self.wim) / max(1, self.him)
             self.Design_bounds = (xmin, xmin+canvas_w/25.4, ymin, ymin+canvas_h/25.4)
+            self.image_alignment = {
+                "width_mm": width,
+                "height_mm": height,
+                "scale_percent": float(scale_percent.get().replace(",", ".")),
+                "nudge_x": dx,
+                "nudge_y": dy,
+                "nudge_step": float(nudge_step.get().replace(",", ".")),
+                "reference": reference.get(),
+            }
             self.Align_Image_Button.configure(state=NORMAL)
             self.statusbar.configure(bg="white")
             self.statusMessage.set("Imagem alinhada e anexada ao raster.")
