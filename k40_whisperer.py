@@ -2672,8 +2672,16 @@ class Application(Frame):
             row=1, column=5, sticky=W, padx=(10, 0))
         Button(geometry, text="Redefinir escala", command=reset_scale).grid(
             row=2, column=5, sticky="nsew", padx=(10, 0), pady=2)
-        Label(reference_box, text="Ponto zero e deslocamento").grid(
-            row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
+        # A nested grid spans the complete displacement block.  This keeps
+        # its lower edge aligned with the reset action while allowing the
+        # three icon rows to share the available height evenly.
+        zero_grid = Frame(reference_box)
+        zero_grid.grid(row=0, column=0, rowspan=4, sticky=NSEW, padx=(0, 8))
+        for grid_index in range(3):
+            zero_grid.columnconfigure(grid_index, weight=1, uniform="zero_grid")
+            zero_grid.rowconfigure(grid_index, weight=1, uniform="zero_grid")
+        for row_index in range(3):
+            reference_box.rowconfigure(row_index, weight=1, uniform="displacement_rows")
         grid_buttons = (
             (1, 0, self.UL_image, lambda: change_reference("Superior esquerdo")),
             (1, 1, self.up_image, lambda: nudge(nudge_y, -1.0)),
@@ -2697,21 +2705,21 @@ class Application(Frame):
             button.bind("<Configure>", resize)
 
         for row_index, column, icon, action in grid_buttons:
-            button = Button(reference_box, image=icon, width=20, height=20, command=action)
+            button = Button(zero_grid, image=icon, width=26, height=26, command=action)
             keep_square(button)
             button.grid(
                 row=row_index, column=column, padx=1, pady=1, sticky="nsew")
-        Label(reference_box, text="X", anchor=W).grid(row=1, column=3, sticky=W, padx=(12, 0))
-        Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=1, column=4, sticky=EW)
+        Label(reference_box, text="X", anchor=W).grid(row=0, column=3, sticky=W, padx=(4, 0))
+        Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=0, column=4, sticky=EW)
+        Label(reference_box, text="mm").grid(row=0, column=5, sticky=W)
+        Label(reference_box, text="Y", anchor=W).grid(row=1, column=3, sticky=W, padx=(4, 0))
+        Entry(reference_box, textvariable=nudge_y, width=9, justify=RIGHT).grid(row=1, column=4, sticky=EW)
         Label(reference_box, text="mm").grid(row=1, column=5, sticky=W)
-        Label(reference_box, text="Y", anchor=W).grid(row=2, column=3, sticky=W, padx=(12, 0))
-        Entry(reference_box, textvariable=nudge_y, width=9, justify=RIGHT).grid(row=2, column=4, sticky=EW)
+        Label(reference_box, text="Passo", anchor=W).grid(row=2, column=3, sticky=W, padx=(4, 0))
+        Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=2, column=4, sticky=EW)
         Label(reference_box, text="mm").grid(row=2, column=5, sticky=W)
-        Label(reference_box, text="Passo", anchor=W).grid(row=3, column=3, sticky=W, padx=(12, 0))
-        Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=3, column=4, sticky=EW)
-        Label(reference_box, text="mm").grid(row=3, column=5, sticky=W)
         Button(reference_box, text="Redefinir deslocamento", command=reset_nudges).grid(
-            row=4, column=3, columnspan=3, sticky=EW, pady=(5, 0))
+            row=3, column=3, columnspan=3, sticky=EW, pady=(3, 0))
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
             Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
