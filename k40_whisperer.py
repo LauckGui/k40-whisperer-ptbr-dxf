@@ -7516,13 +7516,26 @@ class Application(Frame):
             return False
         document = self.job_document
         previous = (list(document.vectors), list(document.rasters), list(document.fills))
+        previous_image = (self.RengData.image.copy() if self.RengData.image is not None else None)
+        previous_source = (self.imported_image_source.copy()
+                           if self.imported_image_source is not None else None)
+        previous_alignment = dict(self.image_alignment) if self.image_alignment else None
+        previous_bounds_override = getattr(self, "_raster_bounds_override", None)
 
         def rollback():
             document.vectors[:], document.rasters[:], document.fills[:] = previous
             document.validate()
+            self.imported_image_source = previous_source
+            self.image_alignment = previous_alignment
+            if previous_image is None:
+                self.RengData.reset()
+            else:
+                self.RengData.set_image(previous_image)
+            self._raster_bounds_override = previous_bounds_override
 
         try:
             apply_document_transform(document, transform)
+            self._transform_aligned_raster(document, transform)
         except Exception:
             rollback()
             raise
@@ -7534,6 +7547,84 @@ class Application(Frame):
             on_complete=on_complete,
         )
         return True
+
+    def _transform_aligned_raster(self, document, transform):
+        """Apply a vector edit to an attached bitmap in physical coordinates.
+
+        Imported bitmaps are not canonical DXF objects, so document rebuilds do
+        not naturally transform them.  Re-sampling the composed bitmap in the
+        same millimetre coordinate system keeps scale, rotation and reflection
+        locked to the edited vectors.
+        """
+        if self.image_alignment is None or self.RengData.image is None:
+            return
+        old_bounds = self.Design_bounds
+        if old_bounds is None or len(old_bounds) != 4:
+            return
+        min_x, max_x, min_y, max_y = [value*25.4 for value in old_bounds]
+        if max_x <= min_x or max_y <= min_y:
+            return
+        dpi = float(self.source_raster_dpi or self.input_dpi or 254.0)
+        if dpi <= 0.0:
+            dpi = 254.0
+        mm_per_pixel = 25.4/dpi
+
+        def transformed(x, y):
+            return (transform.a*x + transform.c*y + transform.e,
+                    transform.b*x + transform.d*y + transform.f)
+
+        corners = [transformed(x, y) for x, y in (
+            (min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y)
+        )]
+        new_min_x = min(point[0] for point in corners)
+        new_max_x = max(point[0] for point in corners)
+        new_min_y = min(point[1] for point in corners)
+        new_max_y = max(point[1] for point in corners)
+        width = max(1, int(round((new_max_x-new_min_x)/mm_per_pixel)))
+        height = max(1, int(round((new_max_y-new_min_y)/mm_per_pixel)))
+        determinant = transform.a*transform.d-transform.b*transform.c
+        if abs(determinant) < 1e-12:
+            raise ValueError("Transformação de imagem inválida.")
+
+        def output_to_source(u, v):
+            x_out = new_min_x + u*mm_per_pixel
+            y_out = new_max_y - v*mm_per_pixel
+            dx, dy = x_out-transform.e, y_out-transform.f
+            x_in = (transform.d*dx-transform.c*dy)/determinant
+            y_in = (-transform.b*dx+transform.a*dy)/determinant
+            return ((x_in-min_x)/mm_per_pixel, (max_y-y_in)/mm_per_pixel)
+
+        origin = output_to_source(0.0, 0.0)
+        axis_x = output_to_source(1.0, 0.0)
+        axis_y = output_to_source(0.0, 1.0)
+        affine = (axis_x[0]-origin[0], axis_y[0]-origin[0], origin[0],
+                  axis_x[1]-origin[1], axis_y[1]-origin[1], origin[1])
+        transformed_image = self.RengData.image.convert("RGBA").transform(
+            (width, height), Image.AFFINE, affine, Image.LANCZOS,
+            fillcolor=(255, 255, 255, 0),
+        )
+        self.RengData.set_image(transformed_image)
+        self.imported_image_source = transformed_image.copy()
+        self.wim, self.him = transformed_image.size
+        self.input_dpi = dpi
+        self.source_raster_dpi = dpi
+        self.SCALE = 0
+        self._raster_bounds_override = (new_min_x, new_max_x, new_min_y, new_max_y)
+
+        vector_bounds = editable_bounds(document)
+        if vector_bounds is not None:
+            # The next alignment session starts from the transformed raster,
+            # already placed relative to the newly edited vector frame.
+            self.image_alignment = {
+                "width_mm": new_max_x-new_min_x,
+                "height_mm": new_max_y-new_min_y,
+                "scale_percent": 100.0,
+                "nudge_x": new_min_x-vector_bounds.min_x,
+                "nudge_y": vector_bounds.max_y-new_max_y,
+                "nudge_step": 0.5,
+                "reference": "Superior esquerdo",
+                "mask_points": None,
+            }
 
     def _rebuild_array_legacy_data(self, previous_arrays=None, rollback=None,
                                    progress_message="Preparando múltiplas cópias...",
@@ -7636,7 +7727,11 @@ class Application(Frame):
         self.document_rebuild_failure_message = None
         self.document_rebuild_on_complete = None
         bounds = self.job_document.bounds
-        if bounds is not None:
+        raster_bounds = getattr(self, "_raster_bounds_override", None)
+        if raster_bounds is not None:
+            self.Design_bounds = tuple(value/25.4 for value in raster_bounds)
+            self._raster_bounds_override = None
+        elif bounds is not None:
             self.Design_bounds = (
                 bounds.min_x/25.4, bounds.max_x/25.4,
                 bounds.min_y/25.4, bounds.max_y/25.4,
