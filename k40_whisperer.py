@@ -270,6 +270,10 @@ class Application(Frame):
                 "arrow_down": ((p(8),p(3)),(p(16),p(3)),(p(16),p(11)),(p(21),p(11)),(p(12),p(21)),(p(3),p(11)),(p(8),p(11))),
                 "arrow_left": ((p(3),p(12)),(p(13),p(3)),(p(13),p(8)),(p(21),p(8)),(p(21),p(16)),(p(13),p(16)),(p(13),p(21))),
                 "arrow_right": ((p(21),p(12)),(p(11),p(3)),(p(11),p(8)),(p(3),p(8)),(p(3),p(16)),(p(11),p(16)),(p(11),p(21))),
+                "arrow_up_left": ((p(3),p(3)),(p(14),p(4)),(p(11),p(7)),(p(21),p(17)),(p(17),p(21)),(p(7),p(11)),(p(4),p(14))),
+                "arrow_up_right": ((p(21),p(3)),(p(20),p(14)),(p(17),p(11)),(p(7),p(21)),(p(3),p(17)),(p(13),p(7)),(p(10),p(4))),
+                "arrow_down_left": ((p(3),p(21)),(p(4),p(10)),(p(7),p(13)),(p(17),p(3)),(p(21),p(7)),(p(11),p(17)),(p(14),p(20))),
+                "arrow_down_right": ((p(21),p(21)),(p(10),p(20)),(p(13),p(17)),(p(3),p(7)),(p(7),p(3)),(p(17),p(13)),(p(20),p(10))),
             }
             draw.polygon(points[name], fill=color)
 
@@ -906,6 +910,10 @@ class Application(Frame):
             "down": self.make_ui_icon("arrow_down", 22),
             "left": self.make_ui_icon("arrow_left", 22),
             "right": self.make_ui_icon("arrow_right", 22),
+            "up_left": self.make_ui_icon("arrow_up_left", 22),
+            "up_right": self.make_ui_icon("arrow_up_right", 22),
+            "down_left": self.make_ui_icon("arrow_down_left", 22),
+            "down_right": self.make_ui_icon("arrow_down_right", 22),
             "play": self.make_ui_icon("play", 18, "white"),
             "pause": self.make_ui_icon("pause", 18, "#3b2a00"),
             "stop": self.make_ui_icon("stop", 18, "white"),
@@ -2551,6 +2559,11 @@ class Application(Frame):
         raster_box.pack(fill=X, pady=(0, 7))
         mask_box = LabelFrame(controls, text=" Máscara por vetor ", padx=8, pady=7)
         mask_box.pack(fill=X, pady=(0, 7))
+        # These flexible trailing columns keep all reset actions aligned to
+        # the same right edge without changing the cards' external sizes.
+        geometry.columnconfigure(6, weight=1)
+        reference_box.columnconfigure(6, weight=1)
+        raster_box.columnconfigure(5, weight=1)
 
         def adjust(variable, amount):
             try:
@@ -2671,7 +2684,7 @@ class Application(Frame):
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
             row=1, column=5, sticky=W, padx=(10, 0))
         Button(geometry, text="Redefinir escala", command=reset_scale).grid(
-            row=2, column=5, sticky="nsew", padx=(10, 0), pady=2)
+            row=2, column=6, sticky=E, padx=(10, 0), pady=2)
         # A nested grid spans the complete displacement block.  This keeps
         # its lower edge aligned with the reset action while allowing the
         # three icon rows to share the available height evenly.
@@ -2683,15 +2696,14 @@ class Application(Frame):
         for row_index in range(3):
             reference_box.rowconfigure(row_index, weight=1, uniform="displacement_rows")
         grid_buttons = (
-            (1, 0, self.UL_image, lambda: change_reference("Superior esquerdo")),
-            (1, 1, self.up_image, lambda: nudge(nudge_y, -1.0)),
-            (1, 2, self.UR_image, lambda: change_reference("Superior direito")),
-            (2, 0, self.left_image, lambda: nudge(nudge_x, -1.0)),
-            (2, 1, self.CC_image, lambda: change_reference("Centro")),
-            (2, 2, self.right_image, lambda: nudge(nudge_x, 1.0)),
-            (3, 0, self.LL_image, lambda: change_reference("Inferior esquerdo")),
-            (3, 1, self.down_image, lambda: nudge(nudge_y, 1.0)),
-            (3, 2, self.LR_image, lambda: change_reference("Inferior direito")),
+            (0, 0, self.ui_icons["up_left"], lambda: (nudge(nudge_x, -1.0), nudge(nudge_y, -1.0))),
+            (0, 1, self.up_image, lambda: nudge(nudge_y, -1.0)),
+            (0, 2, self.ui_icons["up_right"], lambda: (nudge(nudge_x, 1.0), nudge(nudge_y, -1.0))),
+            (1, 0, self.left_image, lambda: nudge(nudge_x, -1.0)),
+            (1, 2, self.right_image, lambda: nudge(nudge_x, 1.0)),
+            (2, 0, self.ui_icons["down_left"], lambda: (nudge(nudge_x, -1.0), nudge(nudge_y, 1.0))),
+            (2, 1, self.down_image, lambda: nudge(nudge_y, 1.0)),
+            (2, 2, self.ui_icons["down_right"], lambda: (nudge(nudge_x, 1.0), nudge(nudge_y, 1.0))),
         )
         def keep_square(button):
             """Match icon-button height to its grid-expanded visual width."""
@@ -2705,7 +2717,7 @@ class Application(Frame):
             button.bind("<Configure>", resize)
 
         for row_index, column, icon, action in grid_buttons:
-            button = Button(zero_grid, image=icon, width=26, height=26, command=action)
+            button = Button(zero_grid, image=icon, width=30, height=30, command=action)
             keep_square(button)
             button.grid(
                 row=row_index, column=column, padx=1, pady=1, sticky="nsew")
@@ -2719,7 +2731,7 @@ class Application(Frame):
         Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=2, column=4, sticky=EW)
         Label(reference_box, text="mm").grid(row=2, column=5, sticky=W)
         Button(reference_box, text="Redefinir deslocamento", command=reset_nudges).grid(
-            row=3, column=3, columnspan=3, sticky=EW, pady=(3, 0))
+            row=3, column=6, sticky=E, padx=(10, 0), pady=(3, 0))
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
             Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
@@ -2744,7 +2756,7 @@ class Application(Frame):
         Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
             row=4, column=0, columnspan=3, sticky=W, pady=(4, 0))
         Button(raster_box, text="Redefinir Ajustes", command=reset_raster_treatment).grid(
-            row=4, column=3, columnspan=2, sticky=EW, pady=(4, 0))
+            row=4, column=5, sticky=E, padx=(10, 0), pady=(4, 0))
         preview_dither = [False]
 
         algorithm_help = {
