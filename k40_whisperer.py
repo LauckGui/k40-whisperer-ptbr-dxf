@@ -406,6 +406,7 @@ class Application(Frame):
         self.raster_contrast = StringVar()
         self.raster_gamma = StringVar()
         self.raster_dither_method = StringVar()
+        self.last_open_directory = StringVar()
         self.Reng_feed  = StringVar()
         self.Veng_feed  = StringVar()
         self.Vcut_feed  = StringVar()
@@ -579,6 +580,7 @@ class Application(Frame):
             self.HOME_DIR = ""
 
         self.DESIGN_FILE = (self.HOME_DIR+"/None")
+        self.last_open_directory.set(self.HOME_DIR)
         self.EGV_FILE    = None
         
         self.aspect_ratio =  0
@@ -1252,7 +1254,8 @@ class Application(Frame):
             "Vcut_power", "Gcode_power", "Trace_power", "max_power",
             "Reng_passes", "Veng_passes", "Vcut_passes", "Gcde_passes",
             "rast_step", "ht_size", "raster_brightness", "raster_contrast",
-            "raster_gamma", "jog_step", "board_name", "units",
+            "raster_gamma", "raster_dither_method", "last_open_directory",
+            "jog_step", "board_name", "units",
             "LaserXsize", "LaserYsize", "LaserXscale", "LaserYscale",
             "LaserRscale", "rapid_feed", "bezier_M1", "bezier_M2",
             "bezier_weight", "trace_gap", "trace_speed", "test_time",
@@ -1264,6 +1267,21 @@ class Application(Frame):
     def _configuration_values(self):
         return {name: variable.get()
                 for name, variable in self._configuration_variables().items()}
+
+    def _preferred_open_directory(self):
+        """Return the last valid workspace folder used by an open dialog."""
+        candidates = (
+            self.last_open_directory.get(),
+            os.path.dirname(self.DESIGN_FILE),
+            self.HOME_DIR,
+        )
+        return next((path for path in candidates if path and os.path.isdir(path)), "")
+
+    def _remember_opened_path(self, filename):
+        """Persist a successful file selection as the shared workspace folder."""
+        directory = os.path.dirname(os.path.abspath(filename))
+        if os.path.isdir(directory):
+            self.last_open_directory.set(directory)
 
     def _apply_configuration(self, settings):
         variables = self._configuration_variables()
@@ -2361,13 +2379,12 @@ class Application(Frame):
             return ''
 
     def menu_File_Open_Settings_File(self,event=None):
-        init_dir = os.path.dirname(self.DESIGN_FILE)
-        if ( not os.path.isdir(init_dir) ):
-            init_dir = self.HOME_DIR
+        init_dir = self._preferred_open_directory()
         fileselect = askopenfilename(filetypes=[("Settings Files","*.txt"),\
                                                 ("All Files","*")],\
                                                  initialdir=init_dir)
         if fileselect != '' and fileselect != ():
+            self._remember_opened_path(fileselect)
             self.Open_Settings_File(fileselect)
 
     def Reduced_Memory_Callback(self, varName, index, mode):
@@ -2409,9 +2426,7 @@ class Application(Frame):
     def menu_File_Open_Design(self,event=None):
         if self.GUI_Disabled:
             return
-        init_dir = os.path.dirname(self.DESIGN_FILE)
-        if ( not os.path.isdir(init_dir) ):
-            init_dir = self.HOME_DIR
+        init_dir = self._preferred_open_directory()
 
         design_types = ("Design Files", ("*.svg","*.dxf"))
         gcode_types  = ("G-Code Files", ("*.ngc","*.gcode","*.g","*.tap"))
@@ -2433,6 +2448,7 @@ class Application(Frame):
 
         if fileselect == () or (not os.path.isfile(fileselect)):
             return
+        self._remember_opened_path(fileselect)
             
         Name, fileExtension = os.path.splitext(fileselect)
         self.update_gui("Opening '%s'" % fileselect )
@@ -2453,9 +2469,7 @@ class Application(Frame):
         """Attach a bitmap without replacing the vector document."""
         if self.GUI_Disabled:
             return
-        initial_dir = os.path.dirname(self.imported_image_filename or self.DESIGN_FILE)
-        if not os.path.isdir(initial_dir):
-            initial_dir = self.HOME_DIR
+        initial_dir = self._preferred_open_directory()
         filename = askopenfilename(
             title="Importar imagem para gravação raster",
             initialdir=initial_dir,
@@ -2468,6 +2482,7 @@ class Application(Frame):
         )
         if not filename or not os.path.isfile(filename):
             return
+        self._remember_opened_path(filename)
         try:
             with Image.open(filename) as image:
                 self.imported_image_source = image.convert("RGBA").copy()
@@ -3147,13 +3162,12 @@ class Application(Frame):
 
 
     def menu_File_Open_EGV(self):
-        init_dir = os.path.dirname(self.DESIGN_FILE)
-        if ( not os.path.isdir(init_dir) ):
-            init_dir = self.HOME_DIR
+        init_dir = self._preferred_open_directory()
         fileselect = askopenfilename(filetypes=[("Engraver Files", ("*.egv","*.EGV")),\
                                                     ("All Files","*")],\
                                                      initialdir=init_dir)
         if fileselect != '' and fileselect != ():
+            self._remember_opened_path(fileselect)
             self.resetPath()
             self.DESIGN_FILE = fileselect
             self.EGV_Send_Window(fileselect)
@@ -7600,7 +7614,9 @@ class Application(Frame):
         affine = (axis_x[0]-origin[0], axis_y[0]-origin[0], origin[0],
                   axis_x[1]-origin[1], axis_y[1]-origin[1], origin[1])
         transformed_image = self.RengData.image.convert("RGBA").transform(
-            (width, height), Image.AFFINE, affine, Image.LANCZOS,
+            # Pillow only supports nearest, bilinear and bicubic resampling
+            # for affine transforms.  LANCZOS raises at runtime here.
+            (width, height), Image.AFFINE, affine, Image.BICUBIC,
             fillcolor=(255, 255, 255, 0),
         )
         self.RengData.set_image(transformed_image)
