@@ -6,7 +6,7 @@ set "PYTHON_EXE=%PROJECT_DIR%.venv-%COMPUTERNAME%\Scripts\python.exe"
 
 pushd "%PROJECT_DIR%"
 
-"%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf"
+"%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf, cairosvg"
 if errorlevel 1 goto :erro
 
 for %%F in (*.py) do (

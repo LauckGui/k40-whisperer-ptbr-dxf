@@ -5,7 +5,7 @@ set "PROJECT_DIR=%~dp0"
 set "PYTHON_EXE=%PROJECT_DIR%.venv-%COMPUTERNAME%\Scripts\python.exe"
 set "APP_SCRIPT=%PROJECT_DIR%k40_whisperer.py"
 
-"%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf" >nul 2>&1
+"%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf, cairosvg" >nul 2>&1
 if errorlevel 1 (
     echo Preparando o ambiente Python local para este computador...
     call "%PROJECT_DIR%Preparar_Ambiente.bat"
