@@ -2498,6 +2498,17 @@ class Application(Frame):
         preview_photo = [None]
         synchronizing = [False]
 
+        def vector_frame():
+            """Return the actual vector bounds, never the expanded raster page."""
+            points = [point for data in (self.VengData, self.VcutData)
+                      for point in data.ecoords]
+            if points:
+                return (
+                    min(point[0] for point in points), max(point[0] for point in points),
+                    min(point[1] for point in points), max(point[1] for point in points),
+                )
+            return self.Get_Design_Bounds()
+
         root_frame = Frame(dialog, padx=10, pady=10)
         root_frame.pack(fill=BOTH, expand=True)
         controls = Frame(root_frame, width=225)
@@ -2543,7 +2554,7 @@ class Application(Frame):
                 height = float(height_mm.get().replace(",", "."))
                 dx = float(nudge_x.get().replace(",", "."))
                 dy = float(nudge_y.get().replace(",", "."))
-                xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+                xmin, xmax, ymin, ymax = vector_frame()
                 vector_w, vector_h = (xmax-xmin)*25.4, (ymax-ymin)*25.4
                 old_ref, old_anchor = reference_anchor(reference.get(), vector_w, vector_h)
                 image_x = old_ref[0]+dx-old_anchor[0]*width
@@ -2658,7 +2669,7 @@ class Application(Frame):
             width, height, dx, dy = data
             preview.delete("all")
             cw, ch = max(1, preview.winfo_width()), max(1, preview.winfo_height())
-            xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+            xmin, xmax, ymin, ymax = vector_frame()
             vector_w = max(1.0, (xmax-xmin)*25.4)
             vector_h = max(1.0, (ymax-ymin)*25.4)
             ref_map = {"Superior esquerdo": (0, 0), "Superior direito": (vector_w, 0),
@@ -2727,7 +2738,7 @@ class Application(Frame):
             if data is None:
                 return
             width, height, dx, dy = data
-            xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+            xmin, xmax, ymin, ymax = vector_frame()
             vector_w = max(0.0, (xmax-xmin)*25.4)
             vector_h = max(0.0, (ymax-ymin)*25.4)
             ref_map = {"Superior esquerdo": (0, 0), "Superior direito": (vector_w, 0),
