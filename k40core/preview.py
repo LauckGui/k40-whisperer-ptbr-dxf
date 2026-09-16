@@ -56,13 +56,18 @@ def model_origin_canvas(x_left, y_top, x_right, plot_scale,
     return x, y_top-position_y/plot_scale
 
 
-def transparent_raster_preview(image, size):
-    """Return a black RGBA overlay where white/off pixels are transparent."""
-    from PIL import Image, ImageOps
+def transparent_raster_preview(image, size, alpha=None):
+    """Return a black RGBA overlay where white/off and masked pixels are transparent."""
+    from PIL import Image, ImageOps, ImageChops
 
     grayscale = image.convert("L").resize(size, Image.LANCZOS)
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
-    overlay.putalpha(ImageOps.invert(grayscale))
+    opacity = ImageOps.invert(grayscale)
+    if alpha is None and image.mode == "RGBA":
+        alpha = image.getchannel("A")
+    if alpha is not None:
+        opacity = ImageChops.multiply(opacity, alpha.convert("L").resize(size, Image.LANCZOS))
+    overlay.putalpha(opacity)
     return overlay
 
 

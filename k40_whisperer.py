@@ -2499,8 +2499,8 @@ class Application(Frame):
         screen_height = dialog.winfo_screenheight()
         usable_width = max(760, screen_width-60)
         usable_height = max(520, screen_height-120)
-        dialog_width = min(1400, usable_width)
-        dialog_height = min(900, usable_height)
+        dialog_width = min(1200, usable_width)
+        dialog_height = min(760, usable_height)
         dialog.geometry("%dx%d+%d+%d" % (
             dialog_width, dialog_height,
             max(0, (screen_width-dialog_width)//2), max(0, (screen_height-dialog_height)//2)))
@@ -2517,7 +2517,7 @@ class Application(Frame):
         scale_percent = StringVar(value="%.3f" % saved_alignment.get("scale_percent", 100.0))
         nudge_x = StringVar(value="%.3f" % saved_alignment.get("nudge_x", 0.0))
         nudge_y = StringVar(value="%.3f" % saved_alignment.get("nudge_y", 0.0))
-        nudge_step = StringVar(value="%.3f" % saved_alignment.get("nudge_step", 1.0))
+        nudge_step = StringVar(value="%.3f" % saved_alignment.get("nudge_step", 0.5))
         reference = StringVar(value=saved_alignment.get("reference", "Centro"))
         keep_ratio = BooleanVar(value=True)
         zoom = [1.0]
@@ -2576,7 +2576,7 @@ class Application(Frame):
             try:
                 adjust(variable, direction*float(nudge_step.get().replace(",", ".")))
             except ValueError:
-                nudge_step.set("1.0")
+                nudge_step.set("0.5")
 
         def reference_anchor(name, vector_w, vector_h):
             anchors = {"Superior esquerdo": (0, 0), "Superior direito": (1, 0),
@@ -2655,7 +2655,7 @@ class Application(Frame):
             """Restore displacement values without changing the chosen anchor."""
             nudge_x.set("0")
             nudge_y.set("0")
-            nudge_step.set("1.0")
+            nudge_step.set("0.5")
             draw_preview()
 
         def reset_raster_treatment():
@@ -2680,10 +2680,10 @@ class Application(Frame):
 
         row(geometry, 0, "Largura", width_mm, "mm", step=1.0)
         row(geometry, 1, "Altura", height_mm, "mm", step=1.0)
-        row(geometry, 2, "Escala", scale_percent, "%", step=5.0)
+        row(geometry, 2, "Escala", scale_percent, "%", step=1.0)
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
             row=1, column=5, sticky=W, padx=(10, 0))
-        Button(geometry, text="Redefinir escala", command=reset_scale).grid(
+        Button(geometry, text="Redefinir escala", width=23, command=reset_scale).grid(
             row=2, column=6, sticky=E, padx=(10, 0), pady=2)
         # A nested grid spans the complete displacement block.  This keeps
         # its lower edge aligned with the reset action while allowing the
@@ -2697,12 +2697,12 @@ class Application(Frame):
             reference_box.rowconfigure(row_index, weight=1, uniform="displacement_rows")
         grid_buttons = (
             (0, 0, self.ui_icons["up_left"], lambda: (nudge(nudge_x, -1.0), nudge(nudge_y, -1.0))),
-            (0, 1, self.up_image, lambda: nudge(nudge_y, -1.0)),
+            (0, 1, self.ui_icons["up"], lambda: nudge(nudge_y, -1.0)),
             (0, 2, self.ui_icons["up_right"], lambda: (nudge(nudge_x, 1.0), nudge(nudge_y, -1.0))),
-            (1, 0, self.left_image, lambda: nudge(nudge_x, -1.0)),
-            (1, 2, self.right_image, lambda: nudge(nudge_x, 1.0)),
+            (1, 0, self.ui_icons["left"], lambda: nudge(nudge_x, -1.0)),
+            (1, 2, self.ui_icons["right"], lambda: nudge(nudge_x, 1.0)),
             (2, 0, self.ui_icons["down_left"], lambda: (nudge(nudge_x, -1.0), nudge(nudge_y, 1.0))),
-            (2, 1, self.down_image, lambda: nudge(nudge_y, 1.0)),
+            (2, 1, self.ui_icons["down"], lambda: nudge(nudge_y, 1.0)),
             (2, 2, self.ui_icons["down_right"], lambda: (nudge(nudge_x, 1.0), nudge(nudge_y, 1.0))),
         )
         def keep_square(button):
@@ -2730,7 +2730,7 @@ class Application(Frame):
         Label(reference_box, text="Passo", anchor=W).grid(row=2, column=3, sticky=W, padx=(4, 0))
         Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=2, column=4, sticky=EW)
         Label(reference_box, text="mm").grid(row=2, column=5, sticky=W)
-        Button(reference_box, text="Redefinir deslocamento", command=reset_nudges).grid(
+        Button(reference_box, text="Redefinir deslocamento", width=23, command=reset_nudges).grid(
             row=3, column=6, sticky=E, padx=(10, 0), pady=(3, 0))
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
@@ -2755,7 +2755,7 @@ class Application(Frame):
         raster_row(3, "Gama", self.raster_gamma, .1, 3.0, .1)
         Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
             row=4, column=0, columnspan=3, sticky=W, pady=(4, 0))
-        Button(raster_box, text="Redefinir Ajustes", command=reset_raster_treatment).grid(
+        Button(raster_box, text="Redefinir Ajustes", width=23, command=reset_raster_treatment).grid(
             row=4, column=5, sticky=E, padx=(10, 0), pady=(4, 0))
         preview_dither = [False]
 
@@ -3051,7 +3051,8 @@ class Application(Frame):
             mask_status.set("Nenhuma borda selecionada")
             draw_preview()
         Button(mask_box, text="Selecionar borda", command=select_mask).pack(side=LEFT, pady=(5, 0))
-        Button(mask_box, text="Redefinir máscara", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
+        Button(mask_box, text="Redefinir máscara", width=23, command=clear_mask).pack(
+            side=RIGHT, pady=(5, 0))
         Button(footer, text="Aplicar", command=apply_image).pack(side=LEFT, padx=(0, 6))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=LEFT)
         trace_variable(width_mm, sync_from_width)
@@ -6680,7 +6681,13 @@ class Application(Frame):
                         nw=int(self.SCALE*self.wim)
                         nh=int(self.SCALE*self.him)
 
-                        plot_im = self.RengData.image.convert("L")                        
+                        # Keep the alpha channel generated by vector masking.
+                        # The old L conversion made masked pixels visible again
+                        # on the main canvas even though they were transparent
+                        # in the alignment editor.
+                        raster_preview = self.RengData.image.convert("RGBA")
+                        plot_alpha = raster_preview.getchannel("A")
+                        plot_im = raster_preview.convert("L")
 ##                        if self.unsharp_flag.get():
 ##                            from PIL import ImageFilter
 ##                            filter = ImageFilter.UnsharpMask()
@@ -6698,15 +6705,17 @@ class Application(Frame):
 
                         if self.mirror.get():
                             plot_im = ImageOps.mirror(plot_im)
+                            plot_alpha = ImageOps.mirror(plot_alpha)
 
                         if self.rotate.get():
                             plot_im = plot_im.rotate(90,expand=True)
+                            plot_alpha = plot_alpha.rotate(90,expand=True)
                             nh=int(self.SCALE*self.wim)
                             nw=int(self.SCALE*self.him)
                             
                         try:
                             self.UI_image = ImageTk.PhotoImage(
-                                transparent_raster_preview(plot_im, (nw, nh))
+                                transparent_raster_preview(plot_im, (nw, nh), alpha=plot_alpha)
                             )
                         except:
                             debug_message("Imaging_Free Used.")

@@ -56,6 +56,16 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(preview.getpixel((0, 0)), (0, 0, 0, 0))
         self.assertEqual(preview.getpixel((1, 0)), (0, 0, 0, 255))
 
+    def test_raster_mask_alpha_is_preserved_in_preview(self):
+        source = Image.new("L", (2, 1), 0)
+        mask = Image.new("L", (2, 1), 255)
+        mask.putpixel((1, 0), 0)
+
+        preview = transparent_raster_preview(source, (2, 1), alpha=mask)
+
+        self.assertEqual(preview.getpixel((0, 0)), (0, 0, 0, 255))
+        self.assertEqual(preview.getpixel((1, 0)), (0, 0, 0, 0))
+
 
 if __name__ == "__main__":
     unittest.main()
