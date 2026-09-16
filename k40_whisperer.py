@@ -2479,6 +2479,11 @@ class Application(Frame):
         dialog.geometry("940x650")
         dialog.minsize(760, 520)
         dialog.transient(self.master)
+        dialog.grab_set()
+        try:
+            dialog.state("zoomed")
+        except Exception:
+            pass
 
         image = self.imported_image_source
         default_width = max(1.0, image.width / 254.0 * 25.4)
@@ -2523,6 +2528,8 @@ class Application(Frame):
         reference_box.pack(fill=X, pady=(0, 7))
         view_box = LabelFrame(controls, text=" Visualização ", padx=8, pady=7)
         view_box.pack(fill=X, pady=(0, 7))
+        raster_box = LabelFrame(controls, text=" Tratamento raster ", padx=8, pady=7)
+        raster_box.pack(fill=X, pady=(0, 7))
         footer = Frame(controls)
         footer.pack(fill=X, side=BOTTOM)
 
@@ -2650,6 +2657,23 @@ class Application(Frame):
         Label(view_box, text="Roda: zoom\nBotão central: pan\nA imagem pode sair da borda do vetor.",
               justify=LEFT, anchor=W, fg="#4b5563").pack(fill=X)
 
+        def raster_row(row_index, label, variable, minimum, maximum, increment):
+            Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
+            Button(raster_box, text="−", width=2,
+                   command=lambda: adjust(variable, -increment)).grid(row=row_index, column=1, padx=(3, 1))
+            Entry(raster_box, textvariable=variable, width=7, justify=RIGHT).grid(row=row_index, column=2, padx=1)
+            Button(raster_box, text="+", width=2,
+                   command=lambda: adjust(variable, increment)).grid(row=row_index, column=3, padx=(1, 3))
+            Scale(raster_box, from_=minimum, to=maximum, orient=HORIZONTAL,
+                  showvalue=0, variable=variable, resolution=increment,
+                  length=105).grid(row=row_index, column=4, sticky=EW)
+
+        raster_row(0, "Brilho", self.raster_brightness, -100, 100, 1)
+        raster_row(1, "Contraste", self.raster_contrast, .1, 3.0, .1)
+        raster_row(2, "Gama", self.raster_gamma, .1, 3.0, .1)
+        Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
+            row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
+
         def values():
             try:
                 width = float(width_mm.get().replace(",", "."))
@@ -2687,7 +2711,14 @@ class Application(Frame):
             def point(x, y): return (pan[0] + (x-min_x)*fit, pan[1] + (y-min_y)*fit)
             px0, py0 = point(ix, iy); px1, py1 = point(ix+width, iy+height)
             target_size = (max(1, int(abs(px1-px0))), max(1, int(abs(py1-py0))))
-            shown = image.resize(target_size, Image.LANCZOS)
+            try:
+                shown = prepare_grayscale(
+                    image, brightness=self.raster_brightness.get(),
+                    contrast=self.raster_contrast.get(), gamma=self.raster_gamma.get(),
+                    invert=bool(self.negate.get()),
+                ).convert("RGBA").resize(target_size, Image.LANCZOS)
+            except Exception:
+                shown = image.resize(target_size, Image.LANCZOS)
             preview_photo[0] = ImageTk.PhotoImage(shown)
             preview.create_image(px0, py0, image=preview_photo[0], anchor=NW)
             preview.create_rectangle(px0, py0, px1, py1, outline="#2563eb", width=2)
@@ -2809,7 +2840,8 @@ class Application(Frame):
         trace_variable(width_mm, sync_from_width)
         trace_variable(height_mm, sync_from_height)
         trace_variable(scale_percent, sync_from_scale)
-        for var in (width_mm, height_mm, scale_percent, nudge_x, nudge_y, reference):
+        for var in (width_mm, height_mm, scale_percent, nudge_x, nudge_y, reference,
+                    self.raster_brightness, self.raster_contrast, self.raster_gamma, self.negate):
             trace_variable(var, draw_preview)
         preview.bind("<MouseWheel>", wheel)
         preview.bind("<Button-2>", pan_start)
