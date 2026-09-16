@@ -2492,6 +2492,7 @@ class Application(Frame):
         pan = [0, 0]
         drag = [None]
         preview_photo = [None]
+        synchronizing = [False]
 
         root_frame = Frame(dialog, padx=10, pady=10)
         root_frame.pack(fill=BOTH, expand=True)
@@ -2517,6 +2518,47 @@ class Application(Frame):
             except ValueError:
                 variable.set("%.3f" % amount)
 
+        def set_dimensions(width, height, scale):
+            synchronizing[0] = True
+            width_mm.set("%.3f" % width)
+            height_mm.set("%.3f" % height)
+            scale_percent.set("%.3f" % scale)
+            synchronizing[0] = False
+
+        def sync_from_width(*unused):
+            if synchronizing[0]:
+                return
+            try:
+                width = float(width_mm.get().replace(",", "."))
+                if width <= 0:
+                    return
+                height = width * default_height/default_width if keep_ratio.get() else float(height_mm.get().replace(",", "."))
+                set_dimensions(width, height, width/default_width*100.0)
+            except ValueError:
+                pass
+
+        def sync_from_height(*unused):
+            if synchronizing[0]:
+                return
+            try:
+                height = float(height_mm.get().replace(",", "."))
+                if height <= 0:
+                    return
+                width = height * default_width/default_height if keep_ratio.get() else float(width_mm.get().replace(",", "."))
+                set_dimensions(width, height, height/default_height*100.0)
+            except ValueError:
+                pass
+
+        def sync_from_scale(*unused):
+            if synchronizing[0]:
+                return
+            try:
+                scale = float(scale_percent.get().replace(",", "."))
+                if scale > 0:
+                    set_dimensions(default_width*scale/100.0, default_height*scale/100.0, scale)
+            except ValueError:
+                pass
+
         def row(parent, index, label, variable, suffix="", step=1.0):
             Label(parent, text=label, anchor=W).grid(row=index, column=0, sticky=W, pady=2)
             Button(parent, text="−", width=2, command=lambda: adjust(variable, -step)).grid(
@@ -2532,19 +2574,28 @@ class Application(Frame):
         row(geometry, 2, "Escala", scale_percent, "%", step=5.0)
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
             row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
-        Label(reference_box, text="Ponto zero da imagem").grid(
+        Label(reference_box, text="Ponto zero e nudge").grid(
             row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
-        reference_buttons = (
-            ("Superior esquerdo", 1, 0, "↖"), ("Superior direito", 1, 2, "↗"),
-            ("Centro", 2, 1, "⊙"),
-            ("Inferior esquerdo", 3, 0, "↙"), ("Inferior direito", 3, 2, "↘"),
+        grid_buttons = (
+            (1, 0, self.UL_image, lambda: reference.set("Superior esquerdo")),
+            (1, 1, self.up_image, lambda: adjust(nudge_y, 1.0)),
+            (1, 2, self.UR_image, lambda: reference.set("Superior direito")),
+            (2, 0, self.left_image, lambda: adjust(nudge_x, -1.0)),
+            (2, 1, self.CC_image, lambda: reference.set("Centro")),
+            (2, 2, self.right_image, lambda: adjust(nudge_x, 1.0)),
+            (3, 0, self.LL_image, lambda: reference.set("Inferior esquerdo")),
+            (3, 1, self.down_image, lambda: adjust(nudge_y, -1.0)),
+            (3, 2, self.LR_image, lambda: reference.set("Inferior direito")),
         )
-        for value, row_index, column, glyph in reference_buttons:
-            Button(reference_box, text=glyph, width=4,
-                   command=lambda item=value: reference.set(item)).grid(
-                       row=row_index, column=column, padx=2, pady=1)
-        row(reference_box, 4, "Nudge X", nudge_x, "mm", step=1.0)
-        row(reference_box, 5, "Nudge Y", nudge_y, "mm", step=1.0)
+        for row_index, column, icon, action in grid_buttons:
+            Button(reference_box, image=icon, command=action).grid(
+                row=row_index, column=column, padx=1, pady=1, sticky="nsew")
+        Label(reference_box, text="X", anchor=W).grid(row=4, column=0, sticky=W, pady=(5, 0))
+        Entry(reference_box, textvariable=nudge_x, width=9, justify=RIGHT).grid(row=4, column=1, sticky=EW, pady=(5, 0))
+        Label(reference_box, text="mm").grid(row=4, column=2, sticky=W, pady=(5, 0))
+        Label(reference_box, text="Y", anchor=W).grid(row=5, column=0, sticky=W, pady=2)
+        Entry(reference_box, textvariable=nudge_y, width=9, justify=RIGHT).grid(row=5, column=1, sticky=EW, pady=2)
+        Label(reference_box, text="mm").grid(row=5, column=2, sticky=W, pady=2)
         Label(view_box, text="Roda: zoom\nBotão central: pan\nA imagem pode sair da borda do vetor.",
               justify=LEFT, anchor=W, fg="#4b5563").pack(fill=X)
 
@@ -2583,8 +2634,6 @@ class Application(Frame):
             min_y, max_y = min(-pad, iy-pad), max(vector_h+pad, iy+height+pad)
             fit = min(cw/max(1, max_x-min_x), ch/max(1, max_y-min_y)) * zoom[0]
             def point(x, y): return (pan[0] + (x-min_x)*fit, pan[1] + (y-min_y)*fit)
-            x0, y0 = point(0, 0); x1, y1 = point(vector_w, vector_h)
-            preview.create_rectangle(x0, y0, x1, y1, outline="#dc2626", width=2)
             px0, py0 = point(ix, iy); px1, py1 = point(ix+width, iy+height)
             target_size = (max(1, int(abs(px1-px0))), max(1, int(abs(py1-py0))))
             shown = image.resize(target_size, Image.LANCZOS)
@@ -2605,7 +2654,6 @@ class Application(Frame):
             draw_vectors(self.VengData.ecoords, "#1d4ed8")
             draw_vectors(self.VcutData.ecoords, "#dc2626")
             preview.create_line(*point(ref_x, ref_y), *point(ref_x, ref_y), fill="#111827")
-            preview.create_oval(x0-3, y0-3, x0+3, y0+3, fill="#dc2626", outline="")
 
         def fit_view():
             zoom[0] = 1.0
@@ -2668,6 +2716,9 @@ class Application(Frame):
         Button(view_box, text="Ajustar à área", command=fit_view).pack(fill=X, pady=(6, 0))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=RIGHT)
         Button(footer, text="Aplicar", command=apply_image).pack(side=RIGHT, padx=(0, 6))
+        trace_variable(width_mm, sync_from_width)
+        trace_variable(height_mm, sync_from_height)
+        trace_variable(scale_percent, sync_from_scale)
         for var in (width_mm, height_mm, scale_percent, nudge_x, nudge_y, reference):
             trace_variable(var, draw_preview)
         preview.bind("<MouseWheel>", wheel)
