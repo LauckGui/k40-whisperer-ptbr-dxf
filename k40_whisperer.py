@@ -2707,14 +2707,14 @@ class Application(Frame):
         Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
             row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
         Label(raster_box, text="Algoritmo", anchor=W).grid(row=4, column=0, sticky=W, pady=(5, 0))
-        OptionMenu(raster_box, self.raster_dither_method, "Limiar", "Halftone",
-                   "Floyd–Steinberg", "Atkinson", "Jarvis–Judice–Ninke", "Bayer 8×8").grid(
-            row=4, column=1, columnspan=4, sticky=EW, pady=(5, 0))
+        algorithm_selector = ttk.Combobox(
+            raster_box, textvariable=self.raster_dither_method, state="readonly",
+            values=("Limiar", "Halftone", "Floyd–Steinberg", "Atkinson",
+                    "Jarvis–Judice–Ninke", "Bayer 8×8"), width=22)
+        algorithm_selector.grid(row=4, column=1, columnspan=4, sticky=EW, pady=(5, 0))
         preview_dither = [False]
-        Button(raster_box, text="Atualizar prévia", command=lambda: (preview_dither.__setitem__(0, True), draw_preview())).grid(
-            row=5, column=0, columnspan=4, sticky=EW, pady=(4, 0))
         Button(raster_box, text="Redefinir", command=reset_raster_treatment).grid(
-            row=5, column=4, sticky=EW, pady=(4, 0))
+            row=5, column=0, columnspan=5, sticky=EW, pady=(4, 0))
 
         mask_status = StringVar(value="Nenhuma borda selecionada")
         Label(mask_box, textvariable=mask_status, anchor=W, fg="#4b5563").pack(fill=X)
@@ -2955,14 +2955,16 @@ class Application(Frame):
         Button(mask_box, text="Selecionar borda", command=select_mask).pack(side=LEFT, pady=(5, 0))
         Button(mask_box, text="Aplicar máscara", command=confirm_mask).pack(side=LEFT, padx=4, pady=(5, 0))
         Button(mask_box, text="Remover", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
-        Button(footer, text="Cancelar", command=dialog.destroy).pack(side=RIGHT)
-        Button(footer, text="Aplicar", command=apply_image).pack(side=RIGHT, padx=(0, 6))
+        Button(footer, text="Aplicar", command=apply_image).pack(side=LEFT, padx=(0, 6))
+        Button(footer, text="Cancelar", command=dialog.destroy).pack(side=LEFT)
         trace_variable(width_mm, sync_from_width)
         trace_variable(height_mm, sync_from_height)
         trace_variable(scale_percent, sync_from_scale)
         for var in (width_mm, height_mm, scale_percent, nudge_x, nudge_y, reference,
                     self.raster_brightness, self.raster_contrast, self.raster_gamma, self.negate):
             trace_variable(var, draw_preview)
+        algorithm_selector.bind("<<ComboboxSelected>>", lambda event: (
+            preview_dither.__setitem__(0, True), draw_preview()))
         preview.bind("<MouseWheel>", wheel)
         preview.bind("<Button-1>", image_drag_start)
         preview.bind("<B1-Motion>", image_drag_move)
