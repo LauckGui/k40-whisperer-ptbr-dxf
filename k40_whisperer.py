@@ -46,7 +46,7 @@ from k40core.preview import (iter_preview_polylines, model_origin_canvas,
                              transparent_raster_preview)
 from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
 from k40core.raster_processing import (color_intensities_from_document,
-                                        prepare_grayscale)
+                                        dither_image, prepare_grayscale)
 from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 
@@ -401,6 +401,7 @@ class Application(Frame):
         self.raster_brightness = StringVar()
         self.raster_contrast = StringVar()
         self.raster_gamma = StringVar()
+        self.raster_dither_method = StringVar()
         self.Reng_feed  = StringVar()
         self.Veng_feed  = StringVar()
         self.Vcut_feed  = StringVar()
@@ -518,6 +519,7 @@ class Application(Frame):
         self.raster_brightness.set("0")
         self.raster_contrast.set("1.0")
         self.raster_gamma.set("1.0")
+        self.raster_dither_method.set("Limiar")
 
         self.Reng_feed.set("100")
         self.Veng_feed.set("20")
@@ -3281,7 +3283,7 @@ class Application(Frame):
                     image_temp = self.convert_halftoning(image_temp)
                     image_temp = image_temp.resize((wim,him))
                 else:
-                    image_temp = image_temp.point(lambda x: 0 if x<128 else 255, '1')
+                    image_temp = dither_image(image_temp, self.raster_dither_method.get())
                     
                 if DEBUG:
                     image_name = os.path.expanduser("~")+"/IMAGE.png"
@@ -3378,7 +3380,9 @@ class Application(Frame):
                 )
                 image_temp = image_temp.resize((width, height))
             else:
-                image_temp = image_temp.point(lambda value: 0 if value < 128 else 255, '1')
+                image_temp = dither_image(
+                    image_temp, self.raster_time_options.get("dither_method", "Limiar")
+                )
 
             scanlines = extract_scanlines(
                 image_temp, self.input_dpi, self.raster_time_options["raster_step"],
