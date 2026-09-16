@@ -2486,6 +2486,7 @@ class Application(Frame):
         scale_percent = StringVar(value="100")
         nudge_x = StringVar(value="0")
         nudge_y = StringVar(value="0")
+        nudge_step = StringVar(value="1.0")
         reference = StringVar(value="Centro")
         keep_ratio = BooleanVar(value=True)
         zoom = [1.0]
@@ -2517,6 +2518,39 @@ class Application(Frame):
                 variable.set("%.3f" % value)
             except ValueError:
                 variable.set("%.3f" % amount)
+
+        def nudge(variable, direction):
+            try:
+                adjust(variable, direction*float(nudge_step.get().replace(",", ".")))
+            except ValueError:
+                nudge_step.set("1.0")
+
+        def reference_anchor(name, vector_w, vector_h):
+            anchors = {"Superior esquerdo": (0, 0), "Superior direito": (1, 0),
+                       "Inferior esquerdo": (0, 1), "Inferior direito": (1, 1), "Centro": (.5, .5)}
+            ref = {"Superior esquerdo": (0, 0), "Superior direito": (vector_w, 0),
+                   "Inferior esquerdo": (0, vector_h), "Inferior direito": (vector_w, vector_h),
+                   "Centro": (vector_w/2.0, vector_h/2.0)}
+            return ref[name], anchors[name]
+
+        def change_reference(new_reference):
+            """Change the anchor while preserving the image's visual position."""
+            try:
+                width = float(width_mm.get().replace(",", "."))
+                height = float(height_mm.get().replace(",", "."))
+                dx = float(nudge_x.get().replace(",", "."))
+                dy = float(nudge_y.get().replace(",", "."))
+                xmin, xmax, ymin, ymax = self.Get_Design_Bounds()
+                vector_w, vector_h = (xmax-xmin)*25.4, (ymax-ymin)*25.4
+                old_ref, old_anchor = reference_anchor(reference.get(), vector_w, vector_h)
+                image_x = old_ref[0]+dx-old_anchor[0]*width
+                image_y = old_ref[1]+dy-old_anchor[1]*height
+                new_ref, new_anchor = reference_anchor(new_reference, vector_w, vector_h)
+                nudge_x.set("%.3f" % (image_x-new_ref[0]+new_anchor[0]*width))
+                nudge_y.set("%.3f" % (image_y-new_ref[1]+new_anchor[1]*height))
+                reference.set(new_reference)
+            except ValueError:
+                reference.set(new_reference)
 
         def set_dimensions(width, height, scale):
             synchronizing[0] = True
@@ -2577,15 +2611,15 @@ class Application(Frame):
         Label(reference_box, text="Ponto zero e nudge").grid(
             row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
         grid_buttons = (
-            (1, 0, self.UL_image, lambda: reference.set("Superior esquerdo")),
-            (1, 1, self.up_image, lambda: adjust(nudge_y, 1.0)),
-            (1, 2, self.UR_image, lambda: reference.set("Superior direito")),
-            (2, 0, self.left_image, lambda: adjust(nudge_x, -1.0)),
-            (2, 1, self.CC_image, lambda: reference.set("Centro")),
-            (2, 2, self.right_image, lambda: adjust(nudge_x, 1.0)),
-            (3, 0, self.LL_image, lambda: reference.set("Inferior esquerdo")),
-            (3, 1, self.down_image, lambda: adjust(nudge_y, -1.0)),
-            (3, 2, self.LR_image, lambda: reference.set("Inferior direito")),
+            (1, 0, self.UL_image, lambda: change_reference("Superior esquerdo")),
+            (1, 1, self.up_image, lambda: nudge(nudge_y, -1.0)),
+            (1, 2, self.UR_image, lambda: change_reference("Superior direito")),
+            (2, 0, self.left_image, lambda: nudge(nudge_x, -1.0)),
+            (2, 1, self.CC_image, lambda: change_reference("Centro")),
+            (2, 2, self.right_image, lambda: nudge(nudge_x, 1.0)),
+            (3, 0, self.LL_image, lambda: change_reference("Inferior esquerdo")),
+            (3, 1, self.down_image, lambda: nudge(nudge_y, 1.0)),
+            (3, 2, self.LR_image, lambda: change_reference("Inferior direito")),
         )
         for row_index, column, icon, action in grid_buttons:
             Button(reference_box, image=icon, command=action).grid(
@@ -2596,6 +2630,9 @@ class Application(Frame):
         Label(reference_box, text="Y", anchor=W).grid(row=5, column=0, sticky=W, pady=2)
         Entry(reference_box, textvariable=nudge_y, width=9, justify=RIGHT).grid(row=5, column=1, sticky=EW, pady=2)
         Label(reference_box, text="mm").grid(row=5, column=2, sticky=W, pady=2)
+        Label(reference_box, text="Passo", anchor=W).grid(row=6, column=0, sticky=W, pady=(3, 0))
+        Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=6, column=1, sticky=EW, pady=(3, 0))
+        Label(reference_box, text="mm").grid(row=6, column=2, sticky=W, pady=(3, 0))
         Label(view_box, text="Roda: zoom\nBotão central: pan\nA imagem pode sair da borda do vetor.",
               justify=LEFT, anchor=W, fg="#4b5563").pack(fill=X)
 
@@ -2660,6 +2697,18 @@ class Application(Frame):
             pan[:] = [0, 0]
             draw_preview()
 
+        def reset_alignment():
+            synchronizing[0] = True
+            width_mm.set("%.3f" % default_width)
+            height_mm.set("%.3f" % default_height)
+            scale_percent.set("100")
+            nudge_x.set("0")
+            nudge_y.set("0")
+            nudge_step.set("1.0")
+            reference.set("Centro")
+            synchronizing[0] = False
+            fit_view()
+
         def wheel(event):
             zoom[0] = max(.2, min(8.0, zoom[0] * (1.15 if event.delta > 0 else 1/1.15)))
             draw_preview()
@@ -2686,21 +2735,26 @@ class Application(Frame):
             ref_x, ref_y = ref_map[reference.get()]
             ax, ay = anchor_map[reference.get()]
             image_x, image_y = ref_x + dx - ax*width, ref_y + dy - ay*height
-            if image_x < -0.001 or image_y < -0.001:
-                message_box("Alinhar imagem", "Nesta primeira versão, a imagem deve permanecer à direita e abaixo da origem do desenho.\nUse outro ponto zero ou ajuste os nudges.")
-                return
             # Raster is generated at a stable 254 DPI; physical dimensions,
             # not the source pixel count, define the laser output size.
             dpi = 254.0
             raster = image.resize((max(1, int(round(width/25.4*dpi))),
                                    max(1, int(round(height/25.4*dpi)))), Image.LANCZOS)
-            canvas_w = max(vector_w, image_x+width)
-            canvas_h = max(vector_h, image_y+height)
+            padding_x = max(0.0, -image_x)
+            padding_y = max(0.0, -image_y)
+            canvas_w = padding_x + max(vector_w, image_x+width)
+            canvas_h = padding_y + max(vector_h, image_y+height)
             composed = Image.new("RGBA", (max(1, int(round(canvas_w/25.4*dpi))),
                                            max(1, int(round(canvas_h/25.4*dpi)))),
                                  (255, 255, 255, 0))
-            composed.alpha_composite(raster, (int(round(image_x/25.4*dpi)),
-                                              int(round(image_y/25.4*dpi))))
+            composed.alpha_composite(raster, (int(round((image_x+padding_x)/25.4*dpi)),
+                                              int(round((image_y+padding_y)/25.4*dpi))))
+            if padding_x or padding_y:
+                for dataset in (self.VengData, self.VcutData):
+                    for point in dataset.ecoords:
+                        point[0] += padding_x/25.4
+                        point[1] += padding_y/25.4
+                    dataset.computeEcoordsLen()
             self.RengData.set_image(composed)
             self.input_dpi = dpi
             self.source_raster_dpi = dpi
@@ -2714,6 +2768,7 @@ class Application(Frame):
             dialog.destroy()
 
         Button(view_box, text="Ajustar à área", command=fit_view).pack(fill=X, pady=(6, 0))
+        Button(view_box, text="Redefinir", command=reset_alignment).pack(fill=X, pady=(4, 0))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=RIGHT)
         Button(footer, text="Aplicar", command=apply_image).pack(side=RIGHT, padx=(0, 6))
         trace_variable(width_mm, sync_from_width)
@@ -3454,7 +3509,7 @@ class Application(Frame):
                     self.set_gui("normal")
                     self.statusbar.configure(bg='white')
                     object_count = len(imported.document.vectors) + len(imported.document.fills)
-                    self.statusMessage.set("DXF importado: %d objetos" % object_count)
+                    self.statusMessage.set("")
                     self.menu_View_Refresh(incremental=True)
                     if imported.warnings:
                         message_box("Importação de DXF:", "\n".join(imported.warnings))
