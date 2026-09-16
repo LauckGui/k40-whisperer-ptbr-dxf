@@ -824,13 +824,13 @@ class Application(Frame):
         self.Vcut_Button  = Label(self.master,text="Cortar", anchor=W)
         self.Grun_Button  = Label(self.master,text="G-code", anchor=W)
 
-        self.Header_Process = Label(self.master,text="Processo", anchor=W)
-        self.Header_Enabled = Label(self.master,text="Ativo", anchor=CENTER)
-        self.Header_Visible = Label(self.master,text="Visível", anchor=CENTER)
-        self.Header_Speed = Label(self.master,text="Velocidade", anchor=CENTER)
-        self.Header_Power = Label(self.master,text="Potência", anchor=CENTER)
-        self.Header_Passes = Label(self.master,text="Passadas", anchor=CENTER)
-        self.Header_Color = Label(self.master,text="Cor", anchor=CENTER)
+        self.Header_Process = Label(self.master,text="Processo", anchor=W, padx=0, pady=0)
+        self.Header_Enabled = Label(self.master,text="Ativo", anchor=CENTER, padx=0, pady=0)
+        self.Header_Visible = Label(self.master,text="Visível", anchor=CENTER, padx=0, pady=0)
+        self.Header_Speed = Label(self.master,text="Velocidade", anchor=CENTER, padx=0, pady=0)
+        self.Header_Power = Label(self.master,text="Potência", anchor=CENTER, padx=0, pady=0)
+        self.Header_Passes = Label(self.master,text="Passadas", anchor=CENTER, padx=0, pady=0)
+        self.Header_Color = Label(self.master,text="Cor", anchor=CENTER, padx=0, pady=0)
         self.Table_Lines = [Frame(self.master, bg="#c7cdd4", height=1) for _ in range(5)]
 
         self.Check_Reng = Checkbutton(self.master,text="", variable=self.run_Reng, anchor=CENTER)
@@ -6107,31 +6107,31 @@ class Application(Frame):
                 # a placa M3 oferece controle por software.
                 x_process=8
                 if self.display_power:
-                    x_enabled=68
-                    x_visible=120
-                    x_speed=164
-                    x_power_table=208
-                    x_pass_entry=256
+                    x_enabled=62
+                    x_visible=104
+                    x_speed=150
+                    x_power_table=199
+                    x_pass_entry=248
                     x_color=316
-                    w_process=60
-                    w_enabled=52
+                    w_process=54
+                    w_enabled=42
                     w_visible=44
-                    w_speed=44
-                    w_power=48
-                    w_pass=52
+                    w_speed=47
+                    w_power=47
+                    w_pass=62
                 else:
-                    x_enabled=85
-                    x_visible=139
-                    x_speed=187
+                    x_enabled=76
+                    x_visible=118
+                    x_speed=166
                     x_power_table=0
-                    x_pass_entry=254
+                    x_pass_entry=248
                     x_color=316
-                    w_process=77
-                    w_enabled=54
-                    w_visible=48
-                    w_speed=67
+                    w_process=68
+                    w_enabled=42
+                    w_visible=46
+                    w_speed=80
                     w_power=0
-                    w_pass=54
+                    w_pass=62
 
                 if self.display_power:
                     self.Header_Speed.configure(
@@ -6350,13 +6350,13 @@ class Application(Frame):
                     self.Header_Process.place(x=x_process, y=header_y, width=w_process, height=30)
                     self.Header_Enabled.place(x=x_enabled, y=header_y, width=w_enabled, height=30)
                     self.Header_Visible.place(x=x_visible, y=header_y, width=w_visible, height=30)
-                    self.Header_Speed.place(x=x_speed, y=header_y, width=w_speed, height=34)
+                    self.Header_Speed.place(x=x_speed, y=header_y, width=w_speed, height=30)
                     if self.display_power:
                         self.Header_Power.place(x=x_power_table, y=header_y, width=w_power, height=30)
                     else:
                         self.Header_Power.place_forget()
                     self.Header_Passes.place(x=x_pass_entry, y=header_y, width=w_pass, height=30)
-                    self.Header_Color.place(x=x_color-2, y=header_y, width=28, height=30)
+                    self.Header_Color.place(x=x_color-3, y=header_y, width=28, height=30)
                     line_positions = (header_y+34, Y_Reng+27, Y_Veng+27, Y_Vcut+27)
                     for line, line_y in zip(self.Table_Lines[:4], line_positions):
                         line.place(x=8, y=line_y, width=334, height=1)
@@ -6481,13 +6481,13 @@ class Application(Frame):
                     self.Header_Process.place(x=x_process, y=header_y, width=w_process, height=30)
                     self.Header_Enabled.place(x=x_enabled, y=header_y, width=w_enabled, height=30)
                     self.Header_Visible.place(x=x_visible, y=header_y, width=w_visible, height=30)
-                    self.Header_Speed.place(x=x_speed, y=header_y, width=w_speed, height=34)
+                    self.Header_Speed.place(x=x_speed, y=header_y, width=w_speed, height=30)
                     if self.display_power:
                         self.Header_Power.place(x=x_power_table, y=header_y, width=w_power, height=30)
                     else:
                         self.Header_Power.place_forget()
                     self.Header_Passes.place(x=x_pass_entry, y=header_y, width=w_pass, height=30)
-                    self.Header_Color.place(x=x_color-2, y=header_y, width=28, height=30)
+                    self.Header_Color.place(x=x_color-3, y=header_y, width=28, height=30)
                     self.Table_Lines[0].place(x=8, y=header_y+34, width=334, height=1)
                     self.Table_Lines[1].place(x=8, y=Yloc+27, width=334, height=1)
                     for line in self.Table_Lines[2:]:
