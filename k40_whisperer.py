@@ -2623,6 +2623,28 @@ class Application(Frame):
             except ValueError:
                 pass
 
+        def reset_scale():
+            """Restore only the bitmap's physical scale."""
+            set_dimensions(default_width, default_height, 100.0)
+            draw_preview()
+
+        def reset_nudges():
+            """Restore displacement values without changing the chosen anchor."""
+            nudge_x.set("0")
+            nudge_y.set("0")
+            nudge_step.set("1.0")
+            draw_preview()
+
+        def reset_raster_treatment():
+            """Restore the non-destructive raster treatment defaults."""
+            self.raster_brightness.set("0")
+            self.raster_contrast.set("1.0")
+            self.raster_gamma.set("1.0")
+            self.negate.set(0)
+            self.raster_dither_method.set("Limiar")
+            preview_dither[0] = False
+            draw_preview()
+
         def row(parent, index, label, variable, suffix="", step=1.0):
             Label(parent, text=label, anchor=W).grid(row=index, column=0, sticky=W, pady=2)
             Button(parent, text="−", width=2, command=lambda: adjust(variable, -step)).grid(
@@ -2638,10 +2660,8 @@ class Application(Frame):
         row(geometry, 2, "Escala", scale_percent, "%", step=5.0)
         Checkbutton(geometry, text="Manter proporção", variable=keep_ratio).grid(
             row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
-        Button(geometry, text="Ajustar à área", command=lambda: fit_view()).grid(
-            row=0, column=5, rowspan=2, sticky="nsew", padx=(10, 0), pady=(0, 3))
-        Button(geometry, text="Redefinir", command=lambda: reset_alignment()).grid(
-            row=2, column=5, rowspan=2, sticky="nsew", padx=(10, 0))
+        Button(geometry, text="Redefinir escala", command=reset_scale).grid(
+            row=0, column=5, rowspan=4, sticky="nsew", padx=(10, 0))
         Label(reference_box, text="Ponto zero e nudge").grid(
             row=0, column=0, columnspan=3, sticky=W, pady=(0, 3))
         grid_buttons = (
@@ -2667,6 +2687,8 @@ class Application(Frame):
         Label(reference_box, text="Passo", anchor=W).grid(row=3, column=3, sticky=W, padx=(12, 0))
         Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=3, column=4, sticky=EW)
         Label(reference_box, text="mm").grid(row=3, column=5, sticky=W)
+        Button(reference_box, text="Redefinir\nnudge", command=reset_nudges).grid(
+            row=1, column=6, rowspan=3, sticky="nsew", padx=(10, 0))
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
             Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
@@ -2690,7 +2712,9 @@ class Application(Frame):
             row=4, column=1, columnspan=4, sticky=EW, pady=(5, 0))
         preview_dither = [False]
         Button(raster_box, text="Atualizar prévia", command=lambda: (preview_dither.__setitem__(0, True), draw_preview())).grid(
-            row=5, column=0, columnspan=5, sticky=EW, pady=(4, 0))
+            row=5, column=0, columnspan=4, sticky=EW, pady=(4, 0))
+        Button(raster_box, text="Redefinir", command=reset_raster_treatment).grid(
+            row=5, column=4, sticky=EW, pady=(4, 0))
 
         mask_status = StringVar(value="Nenhuma borda selecionada")
         Label(mask_box, textvariable=mask_status, anchor=W, fg="#4b5563").pack(fill=X)
@@ -2781,23 +2805,6 @@ class Application(Frame):
                                       for value in point(*coord)], fill="#16a34a", width=3,
                                     tags="Mask")
             preview.create_line(*point(ref_x, ref_y), *point(ref_x, ref_y), fill="#111827")
-
-        def fit_view():
-            zoom[0] = 1.0
-            pan[:] = [0, 0]
-            draw_preview()
-
-        def reset_alignment():
-            synchronizing[0] = True
-            width_mm.set("%.3f" % default_width)
-            height_mm.set("%.3f" % default_height)
-            scale_percent.set("100")
-            nudge_x.set("0")
-            nudge_y.set("0")
-            nudge_step.set("1.0")
-            reference.set("Centro")
-            synchronizing[0] = False
-            fit_view()
 
         def wheel(event):
             zoom[0] = max(.2, min(8.0, zoom[0] * (1.15 if event.delta > 0 else 1/1.15)))
