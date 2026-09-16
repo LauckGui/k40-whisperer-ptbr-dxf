@@ -1,5 +1,7 @@
 """Small, dependency-free interface translation helpers."""
 
+import re
+
 
 ENGLISH = {
     # Common actions and sections.
@@ -50,6 +52,7 @@ ENGLISH = {
     "Cortar": "Cut",
     "Processo": "Process",
     "Ativo": "Enabled",
+    "Visível": "Visible",
     "Velocidade": "Speed",
     "Potência": "Power",
     "Passadas": "Passes",
@@ -323,7 +326,10 @@ def translate_text(text, language="pt-BR"):
 
     translated = text
     # Longer phrases first prevents a short label from breaking a sentence.
+    # Word boundaries make repeated translation idempotent: "Raster" must not
+    # match the beginning of "Rasterizar", nor "Process" of "Processo".
     for original in sorted(source, key=len, reverse=True):
-        if original in translated:
-            translated = translated.replace(original, source[original])
+        pattern = r"(?<!\w)%s(?!\w)" % re.escape(original)
+        translated = re.sub(pattern, lambda match, value=source[original]: value,
+                            translated)
     return translated

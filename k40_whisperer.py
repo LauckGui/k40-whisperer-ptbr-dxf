@@ -162,10 +162,17 @@ class Application(Frame):
         self.h = 490
         frame = Frame(master, width= self.w, height=self.h)
         self.master = master
+        self.master.title(title_text)
         self.x = -1
         self.y = -1
         self.createWidgets()
         self.master.bind_all("<Map>", self._translate_mapped_window, add="+")
+        for entry_class in ("Entry", "TEntry", "Spinbox", "TSpinbox"):
+            self.master.bind_class(entry_class, "<Return>",
+                                   self._finish_field_edit, add="+")
+            self.master.bind_class(entry_class, "<KP_Enter>",
+                                   self._finish_field_edit, add="+")
+        self.master.bind_all("<Button-1>", self._clear_entry_focus, add="+")
         self._translate_widget_tree(self.master)
         self.master.protocol("WM_DELETE_WINDOW", lambda: self.Quit_Click(None))
         self.micro = False
@@ -220,11 +227,20 @@ class Application(Frame):
             draw.arc((p(3),p(3),p(21),p(21)), 35, 320, fill=color, width=width)
             draw.polygon(((p(18),p(2)),(p(23),p(3)),(p(20),p(8))), fill=color)
         elif name == "gear":
-            draw.ellipse((p(5),p(5),p(19),p(19)), fill=color)
-            draw.ellipse((p(10),p(10),p(14),p(14)), fill="white")
-            for box in ((p(10),p(1),p(14),p(7)), (p(10),p(17),p(14),p(23)),
-                        (p(1),p(10),p(7),p(14)), (p(17),p(10),p(23),p(14))):
-                draw.rectangle(box, fill=color)
+            # Cogwheel silhouette with eight evenly spaced teeth, matching the
+            # familiar solid settings symbol without depending on icon fonts.
+            cx = cy = p(12)
+            points = []
+            for tooth in range(8):
+                center_angle = tooth * math.pi / 4.0 - math.pi / 2.0
+                for offset, radius in ((-0.22, 8.5), (-0.14, 11.5),
+                                       (0.14, 11.5), (0.22, 8.5)):
+                    angle = center_angle + offset
+                    points.append((cx + int(round(p(radius) * math.cos(angle))),
+                                   cy + int(round(p(radius) * math.sin(angle)))))
+            draw.polygon(points, fill=color)
+            draw.ellipse((p(5), p(5), p(19), p(19)), fill=color)
+            draw.ellipse((p(9), p(9), p(15), p(15)), fill=(0, 0, 0, 0))
         elif name == "copies":
             draw.rounded_rectangle((p(3),p(3),p(15),p(15)), radius=p(1),
                                    outline=color, width=width)
@@ -810,6 +826,7 @@ class Application(Frame):
 
         self.Header_Process = Label(self.master,text="Processo", anchor=W)
         self.Header_Enabled = Label(self.master,text="Ativo", anchor=CENTER)
+        self.Header_Visible = Label(self.master,text="Visível", anchor=CENTER)
         self.Header_Speed = Label(self.master,text="Velocidade", anchor=CENTER)
         self.Header_Power = Label(self.master,text="Potência", anchor=CENTER)
         self.Header_Passes = Label(self.master,text="Passadas", anchor=CENTER)
@@ -820,6 +837,14 @@ class Application(Frame):
         self.Check_Veng = Checkbutton(self.master,text="", variable=self.run_Veng, anchor=CENTER)
         self.Check_Vcut = Checkbutton(self.master,text="", variable=self.run_Vcut, anchor=CENTER)
         self.Check_Gcde = Checkbutton(self.master,text="", variable=self.run_Gcde, anchor=CENTER)
+        self.Visible_Reng = Checkbutton(self.master, text="", variable=self.include_Reng,
+                                        anchor=CENTER, command=self.menu_View_Refresh)
+        self.Visible_Veng = Checkbutton(self.master, text="", variable=self.include_Veng,
+                                        anchor=CENTER, command=self.menu_View_Refresh)
+        self.Visible_Vcut = Checkbutton(self.master, text="", variable=self.include_Vcut,
+                                        anchor=CENTER, command=self.menu_View_Refresh)
+        self.Visible_Gcde = Checkbutton(self.master, text="", variable=self.include_Gcde,
+                                        anchor=CENTER, command=self.menu_View_Refresh)
 
         self.Color_Reng = Label(self.master,text="", bg="black", relief=SUNKEN, bd=1)
         self.Color_Veng = Label(self.master,text="", bg="blue", relief=SUNKEN, bd=1)
@@ -1217,19 +1242,6 @@ class Application(Frame):
 
         view_menu = Menu(self.menuBar, tearoff=0)
         view_menu.add_command(label=tr("Atualizar <F5>", "Refresh <F5>"), command=self.menu_View_Refresh)
-        layers = Menu(view_menu, tearoff=0)
-        layers.add_checkbutton(label=tr("Imagem raster", "Raster image"), variable=self.include_Reng,
-                               command=self.menu_View_Refresh)
-        if DEBUG:
-            layers.add_checkbutton(label=tr("Trajetórias raster", "Raster paths"), variable=self.include_Rpth,
-                                   command=self.menu_View_Refresh)
-        layers.add_checkbutton(label=tr("Gravação vetorial", "Vector engraving"), variable=self.include_Veng,
-                               command=self.menu_View_Refresh)
-        layers.add_checkbutton(label=tr("Corte vetorial", "Vector cutting"), variable=self.include_Vcut,
-                               command=self.menu_View_Refresh)
-        layers.add_checkbutton(label=tr("Trajetórias G-code", "G-code paths"), variable=self.include_Gcde,
-                               command=self.menu_View_Refresh)
-        view_menu.add_cascade(label=tr("Camadas", "Layers"), menu=layers)
         view_menu.add_checkbutton(label=tr("Ajustar zoom ao desenho", "Fit zoom to design"),
                                   variable=self.zoom2image, command=self.menu_View_Refresh)
         self.menuBar.add_cascade(label=tr("Visualizar", "View"), menu=view_menu)
@@ -1293,6 +1305,7 @@ class Application(Frame):
         self.Vcut_Button.configure(text=tr("Cortar", "Cut"))
         self.Header_Process.configure(text=tr("Processo", "Process"))
         self.Header_Enabled.configure(text=tr("Ativo", "Enabled"))
+        self.Header_Visible.configure(text=tr("Visível", "Visible"))
         self.Header_Speed.configure(text=tr("Velocidade", "Speed"))
         self.Header_Power.configure(text=tr("Potência", "Power"))
         self.Header_Passes.configure(text=tr("Passadas", "Passes"))
@@ -1338,7 +1351,9 @@ class Application(Frame):
     def _translate_widget_tree(self, root):
         """Translate one existing window, preserving its original PT-BR text."""
         try:
-            if isinstance(root, (Tk, Toplevel)):
+            # The main title includes the current filename and is maintained by
+            # menu_View_Refresh. Only translate titles of modal windows here.
+            if isinstance(root, Toplevel):
                 current_title = root.title()
                 original_title = getattr(root, "_k40_pt_title", None)
                 if original_title is None:
@@ -1941,6 +1956,23 @@ class Application(Frame):
             return "break"
         action()
         return "break"
+
+    def _finish_field_edit(self, event=None):
+        """Commit an editor field and return keyboard control to its window."""
+        try:
+            event.widget.winfo_toplevel().focus_set()
+        except (AttributeError, TclError):
+            pass
+
+    def _clear_entry_focus(self, event):
+        """Drop the caret when the user clicks outside an editor field."""
+        try:
+            if event.widget.winfo_class() not in (
+                    "Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "TCombobox"):
+                window = event.widget.winfo_toplevel()
+                window.after_idle(window.focus_set)
+        except (AttributeError, TclError):
+            pass
 
     def _bind_escape_close(self, window, callback=None):
         """Make Escape close a modal editor before it reaches the main window."""
@@ -5641,6 +5673,7 @@ class Application(Frame):
         self.Rapid_Move(xpos,ypos)
         self.menu_View_Refresh()
         self.Format_Position_Entries()
+        self.master.focus_set()
         return "break" if event is not None else None
         
     def Reset(self):
@@ -5852,7 +5885,7 @@ class Application(Frame):
             print('menu_View_Refresh called by: %s' %(calframe[1][3]))
 
         try:
-            app.master.title(title_text+"   "+ self.DESIGN_FILE)
+            self.master.title(title_text+"   "+ self.DESIGN_FILE)
         except:
             pass
         dummy_event = Event()
@@ -5900,6 +5933,10 @@ class Application(Frame):
 
     def _move_preview_by_anchor_delta(self, dx_inches, dy_inches):
         """Translate the rendered job without rebuilding its vector geometry."""
+        if self.zoom2image.get():
+            self.SCALE = 0
+            self.menu_View_Refresh()
+            return
         if self.preview_render_active:
             # Cancel the old batches and rebuild incrementally at the new anchor.
             self.menu_View_Refresh(incremental=True)
@@ -5911,6 +5948,10 @@ class Application(Frame):
 
     def _move_preview_dot_by_offset_delta(self, dx_inches, dy_inches):
         """Translate only the temporary head marker; job geometry stays fixed."""
+        if self.zoom2image.get():
+            self.SCALE = 0
+            self.menu_View_Refresh()
+            return
         self._move_preview_tag('LaserDot', dx_inches, dy_inches)
         self._refresh_model_projections()
         self._update_position_status()
@@ -6066,35 +6107,44 @@ class Application(Frame):
                 # a placa M3 oferece controle por software.
                 x_process=8
                 if self.display_power:
-                    x_enabled=123
-                    x_speed=160
-                    x_power_table=211
-                    x_pass_entry=262
+                    x_enabled=68
+                    x_visible=120
+                    x_speed=164
+                    x_power_table=208
+                    x_pass_entry=256
                     x_color=316
-                    w_process=112
-                    w_enabled=34
-                    w_speed=48
+                    w_process=60
+                    w_enabled=52
+                    w_visible=44
+                    w_speed=44
                     w_power=48
-                    w_pass=48
+                    w_pass=52
                 else:
-                    x_enabled=130
-                    x_speed=172
+                    x_enabled=85
+                    x_visible=139
+                    x_speed=187
                     x_power_table=0
-                    x_pass_entry=244
-                    x_color=310
-                    w_process=120
-                    w_enabled=38
-                    w_speed=68
+                    x_pass_entry=254
+                    x_color=316
+                    w_process=77
+                    w_enabled=54
+                    w_visible=48
+                    w_speed=67
                     w_power=0
-                    w_pass=58
+                    w_pass=54
 
                 if self.display_power:
-                    self.Header_Speed.configure(text="Velocidade")
-                    self.Header_Power.configure(text="Pot.")
-                    self.Header_Passes.configure(text="Pass.")
+                    self.Header_Speed.configure(
+                        text="Speed" if self.language.get() == "en" else "Vel.")
+                    self.Header_Power.configure(
+                        text="Power" if self.language.get() == "en" else "Pot.")
+                    self.Header_Passes.configure(
+                        text="Passes" if self.language.get() == "en" else "Pass.")
                 else:
-                    self.Header_Speed.configure(text="Velocidade")
-                    self.Header_Passes.configure(text="Passadas")
+                    self.Header_Speed.configure(
+                        text="Speed" if self.language.get() == "en" else "Velocidade")
+                    self.Header_Passes.configure(
+                        text="Passes" if self.language.get() == "en" else "Passadas")
 
                 standard_button_h=32
                 Yloc=10
@@ -6225,6 +6275,7 @@ class Application(Frame):
                 if self.GcodeData.ecoords == []:
                     self.Grun_Button.place_forget()
                     self.Check_Gcde.place_forget()
+                    self.Visible_Gcde.place_forget()
                     self.Gcode_Speed_Display.place_forget()
                     self.Color_Gcde.place_forget()
                     self.Reng_Veng_Vcut_Button.place_forget()
@@ -6234,6 +6285,7 @@ class Application(Frame):
                     Yloc=Yloc-30
                     self.Vcut_Button.place(x=x_process, y=Yloc, width=w_process, height=23)
                     self.Check_Vcut.place(x=x_enabled, y=Yloc, width=w_enabled, height=23)
+                    self.Visible_Vcut.place(x=x_visible, y=Yloc, width=w_visible, height=23)
                     self.Entry_Vcut_feed.place(x=x_speed, y=Yloc, width=w_speed, height=23)
                     self.Label_Vcut_passes.place_forget()
                     self.Entry_Vcut_passes.place(x=x_pass_entry, y=Yloc, width=w_pass, height=23)
@@ -6254,6 +6306,7 @@ class Application(Frame):
                     Yloc=Yloc-30
                     self.Veng_Button.place(x=x_process, y=Yloc, width=w_process, height=23)
                     self.Check_Veng.place(x=x_enabled, y=Yloc, width=w_enabled, height=23)
+                    self.Visible_Veng.place(x=x_visible, y=Yloc, width=w_visible, height=23)
                     self.Entry_Veng_feed.place(x=x_speed, y=Yloc, width=w_speed, height=23)
                     self.Label_Veng_passes.place_forget()
                     self.Entry_Veng_passes.place(x=x_pass_entry, y=Yloc, width=w_pass, height=23)
@@ -6274,6 +6327,7 @@ class Application(Frame):
                     Yloc=Yloc-30
                     self.Reng_Button.place(x=x_process, y=Yloc, width=w_process, height=23)
                     self.Check_Reng.place(x=x_enabled, y=Yloc, width=w_enabled, height=23)
+                    self.Visible_Reng.place(x=x_visible, y=Yloc, width=w_visible, height=23)
                     self.Entry_Reng_feed.place(x=x_speed, y=Yloc, width=w_speed, height=23)
                     self.Label_Reng_passes.place_forget()
                     self.Entry_Reng_passes.place(x=x_pass_entry, y=Yloc, width=w_pass, height=23)
@@ -6295,6 +6349,7 @@ class Application(Frame):
                     header_y=Y_Reng-38
                     self.Header_Process.place(x=x_process, y=header_y, width=w_process, height=30)
                     self.Header_Enabled.place(x=x_enabled, y=header_y, width=w_enabled, height=30)
+                    self.Header_Visible.place(x=x_visible, y=header_y, width=w_visible, height=30)
                     self.Header_Speed.place(x=x_speed, y=header_y, width=w_speed, height=34)
                     if self.display_power:
                         self.Header_Power.place(x=x_power_table, y=header_y, width=w_power, height=30)
@@ -6358,6 +6413,7 @@ class Application(Frame):
                         unit_label.place_forget()
                     self.Vcut_Button.place_forget()
                     self.Check_Vcut.place_forget()
+                    self.Visible_Vcut.place_forget()
                     self.Color_Vcut.place_forget()
                     self.Entry_Vcut_feed.place_forget()
                     self.Label_Vcut_feed_u.place_forget()
@@ -6365,6 +6421,7 @@ class Application(Frame):
                     
                     self.Veng_Button.place_forget()
                     self.Check_Veng.place_forget()
+                    self.Visible_Veng.place_forget()
                     self.Color_Veng.place_forget()
                     self.Entry_Veng_feed.place_forget()
                     self.Label_Veng_feed_u.place_forget()
@@ -6372,6 +6429,7 @@ class Application(Frame):
                     
                     self.Reng_Button.place_forget()
                     self.Check_Reng.place_forget()
+                    self.Visible_Reng.place_forget()
                     self.Color_Reng.place_forget()
                     self.Entry_Reng_feed.place_forget()
                     self.Label_Reng_feed_u.place_forget()
@@ -6393,6 +6451,7 @@ class Application(Frame):
                     Yloc=Yloc-30
                     self.Grun_Button.place(x=x_process, y=Yloc, width=w_process, height=23)
                     self.Check_Gcde.place(x=x_enabled, y=Yloc, width=w_enabled, height=23)
+                    self.Visible_Gcde.place(x=x_visible, y=Yloc, width=w_visible, height=23)
                     self.Gcode_Speed_Display.place(x=x_speed, y=Yloc, width=w_speed, height=23)
                     self.Label_Gcde_passes.place_forget()
                     self.Entry_Gcde_passes.place(x=x_pass_entry, y=Yloc, width=w_pass, height=23)
@@ -6421,6 +6480,7 @@ class Application(Frame):
                     header_y=Yloc-38
                     self.Header_Process.place(x=x_process, y=header_y, width=w_process, height=30)
                     self.Header_Enabled.place(x=x_enabled, y=header_y, width=w_enabled, height=30)
+                    self.Header_Visible.place(x=x_visible, y=header_y, width=w_visible, height=30)
                     self.Header_Speed.place(x=x_speed, y=header_y, width=w_speed, height=34)
                     if self.display_power:
                         self.Header_Power.place(x=x_power_table, y=header_y, width=w_power, height=30)
