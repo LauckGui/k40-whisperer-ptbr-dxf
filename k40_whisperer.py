@@ -2507,6 +2507,8 @@ class Application(Frame):
         preview_scale = [1.0]
         preview_photo = [None]
         synchronizing = [False]
+        mask_selecting = [False]
+        selected_mask = [saved_alignment.get("mask_points")]
 
         def vector_frame():
             """Return the actual vector bounds, never the expanded raster page."""
@@ -2535,6 +2537,8 @@ class Application(Frame):
         view_box.pack(fill=X, pady=(0, 7))
         raster_box = LabelFrame(controls, text=" Tratamento raster ", padx=8, pady=7)
         raster_box.pack(fill=X, pady=(0, 7))
+        mask_box = LabelFrame(controls, text=" Máscara por vetor ", padx=8, pady=7)
+        mask_box.pack(fill=X, pady=(0, 7))
         footer = Frame(controls)
         footer.pack(fill=X, side=BOTTOM)
 
@@ -2677,6 +2681,25 @@ class Application(Frame):
         Checkbutton(raster_box, text="Inverter tons", variable=self.negate).grid(
             row=3, column=0, columnspan=5, sticky=W, pady=(4, 0))
 
+        mask_status = StringVar(value="Nenhuma borda selecionada")
+        Label(mask_box, textvariable=mask_status, anchor=W, fg="#4b5563").pack(fill=X)
+
+        def closed_vector_loops(xmin, ymax):
+            loops = []
+            for dataset in (self.VcutData, self.VengData):
+                grouped = {}
+                for point in dataset.ecoords:
+                    grouped.setdefault(point[2], []).append(point)
+                for points in grouped.values():
+                    if len(points) < 3:
+                        continue
+                    first, last = points[0], points[-1]
+                    if hypot(first[0]-last[0], first[1]-last[1]) > .002:
+                        continue
+                    loops.append([((point[0]-xmin)*25.4, (ymax-point[1])*25.4)
+                                  for point in points])
+            return loops
+
         def values():
             try:
                 width = float(width_mm.get().replace(",", "."))
@@ -2739,6 +2762,10 @@ class Application(Frame):
             # Always keep the geometry readable above the bitmap layer.
             draw_vectors(self.VengData.ecoords, "#1d4ed8")
             draw_vectors(self.VcutData.ecoords, "#dc2626")
+            if selected_mask[0]:
+                preview.create_line(*[value for coord in selected_mask[0]
+                                      for value in point(*coord)], fill="#16a34a", width=3,
+                                    tags="Mask")
             preview.create_line(*point(ref_x, ref_y), *point(ref_x, ref_y), fill="#111827")
 
         def fit_view():
@@ -2769,6 +2796,39 @@ class Application(Frame):
                 drag[0] = (event.x, event.y); draw_preview()
 
         def image_drag_start(event):
+            if mask_selecting[0]:
+                xmin, xmax, ymin, ymax = vector_frame()
+                vector_w, vector_h = (xmax-xmin)*25.4, (ymax-ymin)*25.4
+                data = values()
+                if data is None:
+                    return
+                width, height, dx, dy = data
+                ref, anchor = reference_anchor(reference.get(), vector_w, vector_h)
+                ix, iy = ref[0]+dx-anchor[0]*width, ref[1]+dy-anchor[1]*height
+                cw, ch = max(1, preview.winfo_width()), max(1, preview.winfo_height())
+                pad = max(8.0, max(width, height, vector_w, vector_h)*.12)
+                min_x, max_x = min(-pad, ix-pad), max(vector_w+pad, ix+width+pad)
+                min_y, max_y = min(-pad, iy-pad), max(vector_h+pad, iy+height+pad)
+                px = event.x/max(.001, preview_scale[0])+min_x
+                py = event.y/max(.001, preview_scale[0])+min_y
+                def inside(point, polygon):
+                    odd = False
+                    for index, current in enumerate(polygon):
+                        previous = polygon[index-1]
+                        if ((current[1] > point[1]) != (previous[1] > point[1]) and
+                            point[0] < (previous[0]-current[0])*(point[1]-current[1]) /
+                            (previous[1]-current[1]) + current[0]):
+                            odd = not odd
+                    return odd
+                for loop in closed_vector_loops(xmin, ymax):
+                    if inside((px, py), loop):
+                        selected_mask[0] = loop
+                        mask_status.set("Borda selecionada")
+                        mask_selecting[0] = False
+                        draw_preview()
+                        return
+                mask_status.set("Clique dentro de um contorno fechado")
+                return
             image_drag[0] = (event.x, event.y)
 
         def image_drag_move(event):
@@ -2815,6 +2875,13 @@ class Application(Frame):
                                  (255, 255, 255, 0))
             composed.alpha_composite(raster, (int(round((image_x+padding_x)/25.4*dpi)),
                                               int(round((image_y+padding_y)/25.4*dpi))))
+            if selected_mask[0]:
+                mask = Image.new("L", composed.size, 0)
+                mask_points = [((x+padding_x)/25.4*dpi, (y+padding_y)/25.4*dpi)
+                               for x, y in selected_mask[0]]
+                ImageDraw.Draw(mask).polygon(mask_points, fill=255)
+                alpha = composed.getchannel("A")
+                composed.putalpha(Image.composite(alpha, Image.new("L", composed.size, 0), mask))
             if padding_x or padding_y:
                 for dataset in (self.VengData, self.VcutData):
                     for point in dataset.ecoords:
@@ -2842,6 +2909,7 @@ class Application(Frame):
                 "nudge_y": dy,
                 "nudge_step": float(nudge_step.get().replace(",", ".")),
                 "reference": reference.get(),
+                "mask_points": selected_mask[0],
             }
             self.Align_Image_Button.configure(state=NORMAL)
             self.statusbar.configure(bg="white")
@@ -2851,6 +2919,23 @@ class Application(Frame):
 
         Button(view_box, text="Ajustar à área", command=fit_view).pack(fill=X, pady=(6, 0))
         Button(view_box, text="Redefinir", command=reset_alignment).pack(fill=X, pady=(4, 0))
+        def select_mask():
+            mask_selecting[0] = True
+            mask_status.set("Clique dentro do contorno fechado desejado")
+        def clear_mask():
+            selected_mask[0] = None
+            mask_selecting[0] = False
+            mask_status.set("Nenhuma borda selecionada")
+            draw_preview()
+        def confirm_mask():
+            if selected_mask[0]:
+                mask_status.set("Máscara pronta para aplicar")
+                draw_preview()
+            else:
+                mask_status.set("Selecione uma borda antes de aplicar")
+        Button(mask_box, text="Selecionar borda", command=select_mask).pack(side=LEFT, pady=(5, 0))
+        Button(mask_box, text="Aplicar máscara", command=confirm_mask).pack(side=LEFT, padx=4, pady=(5, 0))
+        Button(mask_box, text="Remover", command=clear_mask).pack(side=RIGHT, pady=(5, 0))
         Button(footer, text="Cancelar", command=dialog.destroy).pack(side=RIGHT)
         Button(footer, text="Aplicar", command=apply_image).pack(side=RIGHT, padx=(0, 6))
         trace_variable(width_mm, sync_from_width)
