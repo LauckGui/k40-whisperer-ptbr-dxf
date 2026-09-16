@@ -686,6 +686,12 @@ class Application(Frame):
         self.PreviewCanvas.tag_bind('LaserDot',"<3>"              , self.right_mousePanStart)
         self.PreviewCanvas.tag_bind('LaserDot',"<B3-Motion>"      , self.right_mousePan)
         self.PreviewCanvas.tag_bind('LaserDot',"<ButtonRelease-3>", self.right_mousePanStop)
+        # Com o canvas em foco, as setas reproduzem os botões de jog sem
+        # interferir nos campos numéricos da interface.
+        self.PreviewCanvas.bind("<Left>", lambda event: self.Move_Left())
+        self.PreviewCanvas.bind("<Right>", lambda event: self.Move_Right())
+        self.PreviewCanvas.bind("<Up>", lambda event: self.Move_Up())
+        self.PreviewCanvas.bind("<Down>", lambda event: self.Move_Down())
 
         # Left Column #
         separator_color = "#c7cdd4"
@@ -2476,14 +2482,11 @@ class Application(Frame):
             return
         dialog = Toplevel(self.master)
         dialog.title("Alinhar imagem")
-        dialog.geometry("940x650")
+        usable_height = max(520, dialog.winfo_screenheight()-120)
+        dialog.geometry("940x%d" % min(700, usable_height))
         dialog.minsize(760, 520)
         dialog.transient(self.master)
         dialog.grab_set()
-        try:
-            dialog.state("zoomed")
-        except Exception:
-            pass
 
         image = self.imported_image_source
         default_width = max(1.0, image.width / 254.0 * 25.4)
@@ -2500,6 +2503,8 @@ class Application(Frame):
         zoom = [1.0]
         pan = [0, 0]
         drag = [None]
+        image_drag = [None]
+        preview_scale = [1.0]
         preview_photo = [None]
         synchronizing = [False]
 
@@ -2654,8 +2659,6 @@ class Application(Frame):
         Label(reference_box, text="Passo", anchor=W).grid(row=6, column=0, sticky=W, pady=(3, 0))
         Entry(reference_box, textvariable=nudge_step, width=9, justify=RIGHT).grid(row=6, column=1, sticky=EW, pady=(3, 0))
         Label(reference_box, text="mm").grid(row=6, column=2, sticky=W, pady=(3, 0))
-        Label(view_box, text="Roda: zoom\nBotão central: pan\nA imagem pode sair da borda do vetor.",
-              justify=LEFT, anchor=W, fg="#4b5563").pack(fill=X)
 
         def raster_row(row_index, label, variable, minimum, maximum, increment):
             Label(raster_box, text=label, anchor=W).grid(row=row_index, column=0, sticky=W, pady=2)
@@ -2708,6 +2711,7 @@ class Application(Frame):
             min_x, max_x = min(-pad, ix-pad), max(vector_w+pad, ix+width+pad)
             min_y, max_y = min(-pad, iy-pad), max(vector_h+pad, iy+height+pad)
             fit = min(cw/max(1, max_x-min_x), ch/max(1, max_y-min_y)) * zoom[0]
+            preview_scale[0] = fit
             def point(x, y): return (pan[0] + (x-min_x)*fit, pan[1] + (y-min_y)*fit)
             px0, py0 = point(ix, iy); px1, py1 = point(ix+width, iy+height)
             target_size = (max(1, int(abs(px1-px0))), max(1, int(abs(py1-py0))))
@@ -2763,6 +2767,18 @@ class Application(Frame):
             if drag[0]:
                 pan[0] += event.x-drag[0][0]; pan[1] += event.y-drag[0][1]
                 drag[0] = (event.x, event.y); draw_preview()
+
+        def image_drag_start(event):
+            image_drag[0] = (event.x, event.y)
+
+        def image_drag_move(event):
+            if image_drag[0] is None:
+                return
+            dx = (event.x-image_drag[0][0])/max(.001, preview_scale[0])
+            dy = (event.y-image_drag[0][1])/max(.001, preview_scale[0])
+            nudge(nudge_x, dx/max(.001, float(nudge_step.get().replace(",", "."))))
+            nudge(nudge_y, dy/max(.001, float(nudge_step.get().replace(",", "."))))
+            image_drag[0] = (event.x, event.y)
 
         def apply_image():
             data = values()
@@ -2844,9 +2860,16 @@ class Application(Frame):
                     self.raster_brightness, self.raster_contrast, self.raster_gamma, self.negate):
             trace_variable(var, draw_preview)
         preview.bind("<MouseWheel>", wheel)
+        preview.bind("<Button-1>", image_drag_start)
+        preview.bind("<B1-Motion>", image_drag_move)
         preview.bind("<Button-2>", pan_start)
         preview.bind("<B2-Motion>", pan_move)
         preview.bind("<Configure>", draw_preview)
+        dialog.bind("<Left>", lambda event: nudge(nudge_x, -1.0))
+        dialog.bind("<Right>", lambda event: nudge(nudge_x, 1.0))
+        dialog.bind("<Up>", lambda event: nudge(nudge_y, -1.0))
+        dialog.bind("<Down>", lambda event: nudge(nudge_y, 1.0))
+        dialog.bind("<Escape>", lambda event: dialog.destroy())
         dialog.after(30, draw_preview)
         
     def menu_File_Raster_Engrave(self):
