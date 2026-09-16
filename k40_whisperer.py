@@ -49,6 +49,7 @@ from k40core.raster_processing import (color_intensities_from_document,
                                         dither_image, prepare_grayscale)
 from k40core.raster_paths import extract_scanlines
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
+from k40core.i18n import translate_text
 
 import inkex
 import simplestyle
@@ -136,6 +137,7 @@ except:
     pass
 
 QUIET = False
+ACTIVE_LANGUAGE = "pt-BR"
    
 ################################################################################
 class Application(Frame):
@@ -152,6 +154,9 @@ class Application(Frame):
         self.array_build_thread = None
         self.array_build_queue = None
         self.array_previous_arrays = None
+        self._translation_guard = False
+        self._translated_variable_traces = {}
+        self._translation_scheduled = set()
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -160,6 +165,8 @@ class Application(Frame):
         self.x = -1
         self.y = -1
         self.createWidgets()
+        self.master.bind_all("<Map>", self._translate_mapped_window, add="+")
+        self._translate_widget_tree(self.master)
         self.master.protocol("WM_DELETE_WINDOW", lambda: self.Quit_Click(None))
         self.micro = False
         
@@ -906,7 +913,6 @@ class Application(Frame):
         trace_variable(self.jog_step, self.Entry_Step_Callback)
 
         ###########################################################################
-        self.GoTo_Button    = Button(self.master,text="Mover para", command=self.GoTo)
         self.Label_Current_Position = Label(self.master,text="Posição atual:", anchor=W)
         self.Display_CurrentX = Label(self.master, anchor=CENTER, textvariable=self.currentX)
         self.Display_CurrentY = Label(self.master, anchor=CENTER, textvariable=self.currentY)
@@ -954,7 +960,6 @@ class Application(Frame):
         self.Align_Image_Button.configure(image=self.ui_icons["image_edit"], compound=LEFT)
         self.Home_Button.configure(image=self.ui_icons["home"], compound=LEFT)
         self.UnLock_Button.configure(image=self.ui_icons["unlock"], compound=LEFT)
-        self.GoTo_Button.configure(image=self.ui_icons["target_compact"], compound=LEFT)
         self.Up_Button.configure(image=self.ui_icons["up"])
         self.Down_Button.configure(image=self.ui_icons["down"])
         self.Left_Button.configure(image=self.ui_icons["left"])
@@ -968,11 +973,10 @@ class Application(Frame):
         for button in (self.Initialize_Button, self.Open_Button, self.Reload_Button,
                        self.Array_Button, self.Edit_Button,
                        self.Import_Image_Button, self.Align_Image_Button,
-                       self.Home_Button, self.UnLock_Button, self.GoTo_Button,
+                       self.Home_Button, self.UnLock_Button,
                        self.Run_Button, self.Pause_Button, self.Stop_Button,
                        self.Preview_Button):
             button.configure(padx=7, pady=2)
-        self.GoTo_Button.configure(padx=2)
         
         self.Entry_GoToX   = Entry(self.master,width="15",justify='center')
         self.Entry_GoToX.configure(textvariable=self.gotoX)
@@ -1268,6 +1272,8 @@ class Application(Frame):
 
     def _apply_interface_language(self):
         """Apply language immediately to menus and primary action buttons."""
+        global ACTIVE_LANGUAGE
+        ACTIVE_LANGUAGE = self.language.get()
         self._build_main_menus()
         english = self.language.get() == "en"
         tr = lambda pt, en: en if english else pt
@@ -1295,6 +1301,90 @@ class Application(Frame):
         self.Run_Button.configure(text=tr("Rodar", "Run"))
         self.Pause_Button.configure(text=tr("Pausar", "Pause"))
         self.Stop_Button.configure(text=tr("Parar", "Stop"))
+        self._translate_widget_tree(self.master)
+
+    def _translate_variable(self, variable_name):
+        """Translate a display-only Tk variable whenever its source changes."""
+        if self._translation_guard:
+            return
+        try:
+            value = self.master.getvar(variable_name)
+            translated = translate_text(value, self.language.get())
+            if translated != value:
+                self._translation_guard = True
+                self.master.setvar(variable_name, translated)
+        except (TclError, AttributeError):
+            pass
+        finally:
+            self._translation_guard = False
+
+    def _watch_display_variable(self, widget):
+        """Watch StringVars used by labels without touching model variables."""
+        try:
+            if widget.winfo_class() not in ("Label", "TLabel", "Message"):
+                return
+            variable_name = str(widget.cget("textvariable"))
+            if not variable_name or variable_name in self._translated_variable_traces:
+                return
+            callback = self.master.register(
+                lambda *unused, name=variable_name: self._translate_variable(name)
+            )
+            self.master.tk.call("trace", "add", "variable", variable_name, "write", callback)
+            self._translated_variable_traces[variable_name] = callback
+            self._translate_variable(variable_name)
+        except TclError:
+            pass
+
+    def _translate_widget_tree(self, root):
+        """Translate one existing window, preserving its original PT-BR text."""
+        try:
+            if isinstance(root, (Tk, Toplevel)):
+                current_title = root.title()
+                original_title = getattr(root, "_k40_pt_title", None)
+                if original_title is None:
+                    original_title = translate_text(current_title, "pt-BR")
+                    root._k40_pt_title = original_title
+                root.title(translate_text(original_title, self.language.get()))
+
+            try:
+                current = root.cget("text")
+            except TclError:
+                current = ""
+            if current:
+                original = getattr(root, "_k40_pt_text", None)
+                if original is None:
+                    original = translate_text(current, "pt-BR")
+                    root._k40_pt_text = original
+                expected = translate_text(original, self.language.get())
+                if current != expected:
+                    normalized = translate_text(current, "pt-BR")
+                    if normalized != translate_text(expected, "pt-BR"):
+                        original = normalized
+                        root._k40_pt_text = original
+                root.configure(text=translate_text(original, self.language.get()))
+
+            self._watch_display_variable(root)
+            for child in root.winfo_children():
+                self._translate_widget_tree(child)
+        except (TclError, AttributeError):
+            pass
+
+    def _translate_mapped_window(self, event):
+        """Translate dialogs created after the language was selected."""
+        try:
+            window = event.widget.winfo_toplevel()
+            key = str(window)
+            if key in self._translation_scheduled:
+                return
+            self._translation_scheduled.add(key)
+
+            def apply_translation():
+                self._translation_scheduled.discard(key)
+                self._translate_widget_tree(window)
+
+            self.master.after_idle(apply_translation)
+        except (TclError, AttributeError):
+            pass
 
 ################################################################################
     def _configuration_variables(self):
@@ -2554,13 +2644,14 @@ class Application(Frame):
             return
         initial_dir = self._preferred_open_directory()
         filename = askopenfilename(
-            title="Importar imagem para gravação raster",
+            title=translate_text("Importar imagem para gravação raster", self.language.get()),
             initialdir=initial_dir,
             filetypes=[
-                ("Imagens suportadas", ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")),
+                (translate_text("Imagens suportadas", self.language.get()),
+                 ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")),
                 ("PNG", "*.png"), ("JPEG", ("*.jpg", "*.jpeg")),
                 ("Bitmap", "*.bmp"), ("TIFF", ("*.tif", "*.tiff")),
-                ("Todos os arquivos", "*"),
+                (translate_text("Todos os arquivos", self.language.get()), "*"),
             ],
         )
         if not filename or not os.path.isfile(filename):
@@ -2628,6 +2719,15 @@ class Application(Frame):
         synchronizing = [False]
         mask_selecting = [False]
         selected_mask = [saved_alignment.get("mask_points")]
+        algorithm_names = ("Limiar", "Halftone", "Floyd–Steinberg", "Atkinson",
+                           "Jarvis–Judice–Ninke", "Bayer 8×8")
+        algorithm_labels = {
+            name: translate_text(name, self.language.get()) for name in algorithm_names
+        }
+        algorithm_values = {label: name for name, label in algorithm_labels.items()}
+        algorithm_display = StringVar(value=algorithm_labels.get(
+            self.raster_dither_method.get(), self.raster_dither_method.get()
+        ))
 
         def vector_frame():
             """Return the actual vector bounds, never the expanded raster page."""
@@ -2764,6 +2864,7 @@ class Application(Frame):
             self.raster_gamma.set("1.0")
             self.negate.set(0)
             self.raster_dither_method.set("Limiar")
+            algorithm_display.set(algorithm_labels["Limiar"])
             preview_dither[0] = False
             draw_preview()
 
@@ -2845,9 +2946,8 @@ class Application(Frame):
 
         Label(raster_box, text="Algoritmo", anchor=W).grid(row=0, column=0, sticky=W, pady=(0, 3))
         algorithm_selector = ttk.Combobox(
-            raster_box, textvariable=self.raster_dither_method, state="readonly",
-            values=("Limiar", "Halftone", "Floyd–Steinberg", "Atkinson",
-                    "Jarvis–Judice–Ninke", "Bayer 8×8"), width=22)
+            raster_box, textvariable=algorithm_display, state="readonly",
+            values=tuple(algorithm_labels[name] for name in algorithm_names), width=22)
         algorithm_selector.grid(row=0, column=1, columnspan=3, sticky=EW, pady=(0, 3))
         Button(raster_box, image=self.ui_icons["gear"], command=self.RASTER_Settings_Window,
                padx=2, pady=1).grid(row=0, column=4, sticky=E, padx=(4, 0), pady=(0, 3))
@@ -2892,7 +2992,8 @@ class Application(Frame):
         def show_algorithm_menu_tooltip(widget, x, y):
             try:
                 index = int(dialog.tk.call(widget, "nearest", y))
-                value = dialog.tk.call(widget, "get", index)
+                displayed_value = dialog.tk.call(widget, "get", index)
+                value = algorithm_values.get(displayed_value, displayed_value)
                 root_x = (int(dialog.tk.call("winfo", "rootx", widget)) +
                           int(dialog.tk.call("winfo", "width", widget)) + 10)
                 root_y = int(dialog.tk.call("winfo", "rooty", widget)) + int(y)
@@ -3164,6 +3265,9 @@ class Application(Frame):
             trace_variable(var, draw_preview)
         def apply_algorithm_selection(event):
             hide_algorithm_tooltip()
+            self.raster_dither_method.set(
+                algorithm_values.get(algorithm_display.get(), algorithm_display.get())
+            )
             preview_dither[0] = True
             draw_preview()
         algorithm_selector.bind("<<ComboboxSelected>>", apply_algorithm_selection)
@@ -6048,7 +6152,6 @@ class Application(Frame):
                                            width=command_entry_w, height=compact_button_h)
 
                     command_row=compact_button_h+compact_gap
-                    self.GoTo_Button.place_forget()
                     self.Label_Step.place(x=command_x, y=jog_top+command_row,
                                           width=command_label_w, height=compact_button_h)
                     self.Entry_Step.place(x=command_x+command_label_w, y=jog_top+command_row,
@@ -6092,7 +6195,6 @@ class Application(Frame):
                     self.LR_Button.place_forget()
                     self.Label_GoToX.place_forget()
                     self.Label_GoToY.place_forget()
-                    self.GoTo_Button.place_forget()
                     self.Entry_GoToX.place_forget()
                     self.Entry_GoToY.place_forget()
                     self.Label_Current_Position.place_forget()
@@ -8714,6 +8816,8 @@ def fmessage(text,newline=True):
 #                               Message Box                                    #
 ################################################################################
 def message_box(title,message):
+    title = translate_text(title, ACTIVE_LANGUAGE)
+    message = translate_text(message, ACTIVE_LANGUAGE)
     title = "%s (K40 Whisperer V%s)" %(title,version)
     if VERSION == 3:
         tkinter.messagebox.showinfo(title,message)
@@ -8725,6 +8829,8 @@ def message_box(title,message):
 #                          Message Box ask OK/Cancel                           #
 ################################################################################
 def message_ask_ok_cancel(title, mess):
+    title = translate_text(title, ACTIVE_LANGUAGE)
+    mess = translate_text(mess, ACTIVE_LANGUAGE)
     if VERSION == 3:
         result=tkinter.messagebox.askokcancel(title, mess)
     else:
