@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 # standard library
 import math
 import tempfile, os, sys, shutil
+from io import BytesIO
 
 import zipfile
 import re
@@ -166,6 +167,7 @@ class SVG_READER(inkex.Effect):
         self.CSS_values = CSS_values_class()
 
     def parse_svg(self,filename):
+        self.svg_filename = os.path.abspath(filename)
         try:
             self.parse(filename)
             #self.parse(filename, encoding='utf-8')
@@ -692,6 +694,33 @@ class SVG_READER(inkex.Effect):
 
 
     def Make_PNG(self):
+        # SVGs com imagens não devem exigir um aplicativo externo. CairoSVG
+        # preserva as transformações e o posicionamento declarados no SVG, o
+        # que é essencial para manter raster e vetores alinhados.
+        if self.inkscape_exe is None:
+            try:
+                import cairosvg
+                width_mm, height_mm = self.SVG_Size[0], self.SVG_Size[1]
+                output_width = max(1, int(round(width_mm/25.4*self.image_dpi)))
+                output_height = max(1, int(round(height_mm/25.4*self.image_dpi)))
+                png_data = cairosvg.svg2png(
+                    bytestring=etree.tostring(self.document),
+                    url=("file:///" + getattr(self, "svg_filename", "").replace("\\", "/")),
+                    output_width=output_width,
+                    output_height=output_height,
+                    background_color="white",
+                    # SVGs exportados pelo Rhino podem referenciar imagens ao
+                    # lado do arquivo; a origem ainda é um arquivo escolhido
+                    # localmente pelo usuário, nunca conteúdo remoto baixado.
+                    unsafe=True,
+                )
+                self.raster_PIL = Image.open(BytesIO(png_data)).convert("L")
+                return
+            except Exception as exc:
+                raise Exception(
+                    "Não foi possível rasterizar o SVG internamente. %s" % exc
+                )
+
         #create OS temp folder
         tmp_dir = tempfile.mkdtemp()
         #tmp_dir = self.tempDir()
@@ -727,8 +756,6 @@ class SVG_READER(inkex.Effect):
                     pass
                 error_text = "%s" %(e)
                 raise Exception("Inkscape Execution Failed (while making raster data).\n%s" %(error_text))
-        else:
-            raise Exception("Inkscape Not found.")
         try:
             shutil.rmtree(tmp_dir)
         except:
