@@ -17,10 +17,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-version = '0.71'
+version = '1.1'
 title_text = "K40 Whisperer V"+version
 
 import sys
+from dataclasses import replace
 from math import *
 from egv import egv
 from nano_library import K40_CLASS
@@ -36,9 +37,12 @@ from modern_importers import import_dxf
 from k40core.configuration import (ConfigurationError, configuration_path,
                                    load_configuration, save_configuration)
 from k40core.coordinates import display_y, origin_for_reference
-from k40core.arrays import array_steps, instance_array_bounds, maximum_array_counts
+from k40core.arrays import (array_steps, instance_array_bounds, instance_offsets,
+                            maximum_array_counts, referenced_bounds)
+from k40core.execution import (document_instance_offsets, split_repeated_ecoords,
+                               translate_ecoords)
 from k40core.legacy import vector_lines_in_inches
-from k40core.model import Bounds, InstanceArray, Operation, Point
+from k40core.model import AffineTransform, Bounds, InstanceArray, Operation, Point
 from k40core.transforms import (apply_document_transform, editable_bounds,
                                 reflection, rotation, uniform_scale)
 from k40core.preview import (iter_preview_polylines, model_origin_canvas,
@@ -48,8 +52,12 @@ from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
 from k40core.raster_processing import (color_intensities_from_document,
                                         dither_image, prepare_grayscale)
 from k40core.raster_paths import extract_scanlines
+from k40core.raster_instances import (preview_bitmap_offsets,
+                                      raster_content_bounds,
+                                      raster_instance_offsets, repeat_scanlines)
 from k40core.safety import WorkAreaError, placed_job_bounds, validate_work_area
 from k40core.i18n import translate_text
+from k40core.project import load_project, save_project
 
 import inkex
 import simplestyle
@@ -95,6 +103,7 @@ if VERSION < 3 and sys.version_info[1] < 6:
         return item.__next__()
 
 import math
+import io
 from time import time
 import os
 import re
@@ -151,12 +160,21 @@ class Application(Frame):
         self.preview_line_buffer = None
         self.preview_render_active = False
         self.job_document = None
+        self.source_raster_dpi = 0.0
+        self.imported_image_source = None
+        self.imported_image_filename = None
+        self.image_alignment = None
+        self._raster_bounds_override = None
         self.array_build_thread = None
         self.array_build_queue = None
         self.array_previous_arrays = None
         self._translation_guard = False
         self._translated_variable_traces = {}
         self._translation_scheduled = set()
+        self.PROJECT_FILE = None
+        self.project_dirty = False
+        self._project_loading = False
+        self._project_ready = False
         Frame.__init__(self, master)
         self.w = 780
         self.h = 490
@@ -197,6 +215,95 @@ class Application(Frame):
         #    self.move_head_window_temporary([0.0,0.0])
             
         self.pos_offset=[0.0,0.0]
+
+    def _raster_instance_offsets_mm(self):
+        """Active translations for one shared source bitmap."""
+        if (self.RengData.image is None or self.job_document is None
+                or not self.job_document.arrays):
+            return ((0.0, 0.0),)
+        # Native SVG rasters without a canonical raster/fill source keep their
+        # legacy single-page behavior. Imported images and DXF fills are tied
+        # to the procedural piece.
+        if self.image_alignment is None and not self.job_document.fills:
+            return ((0.0, 0.0),)
+        try:
+            return raster_instance_offsets(self.job_document)
+        except (ValueError, KeyError):
+            return ((0.0, 0.0),)
+
+    def _effective_raster_content_bounds_mm(self):
+        """Bounds of pixels that can actually engrave, including alpha masks."""
+        image = self.RengData.image
+        document = self.job_document
+        if image is None or document is None:
+            return None
+        vector_bounds = editable_bounds(document)
+        if vector_bounds is None:
+            return None
+        alignment = self.image_alignment or {}
+        return raster_content_bounds(
+            image,
+            float(self.input_dpi or self.source_raster_dpi or 254.0),
+            vector_bounds,
+            float(alignment.get("vector_offset_x_mm", 0.0)),
+            float(alignment.get("vector_offset_y_mm", 0.0)),
+            white_is_empty=bool(document.fills and self.image_alignment is None),
+        )
+
+    def _source_piece_bounds_mm(self, document=None):
+        document = document or self.job_document
+        if document is None:
+            return None
+        return Bounds.union((editable_bounds(document),
+                             self._effective_raster_content_bounds_mm()))
+
+    def _raster_canvas_bounds_mm(self):
+        """Full bitmap canvas in canonical model coordinates."""
+        if self.RengData.image is None or self.job_document is None:
+            return None
+        vector_bounds = editable_bounds(self.job_document)
+        if vector_bounds is None:
+            return None
+        alignment = self.image_alignment or {}
+        origin_x = vector_bounds.min_x-float(
+            alignment.get("vector_offset_x_mm", 0.0)
+        )
+        origin_y = vector_bounds.min_y-float(
+            alignment.get("vector_offset_y_mm", 0.0)
+        )
+        dpi = float(self.input_dpi or self.source_raster_dpi or 254.0)
+        return Bounds(
+            origin_x, origin_y,
+            origin_x+self.RengData.image.width/dpi*25.4,
+            origin_y+self.RengData.image.height/dpi*25.4,
+        )
+
+    def _raster_route_offsets_mm(self):
+        """Absolute placement offsets used by scanlines/EGV generation."""
+        canvas = self._raster_canvas_bounds_mm()
+        origin_x = canvas.min_x if canvas is not None else 0.0
+        origin_y = canvas.min_y if canvas is not None else 0.0
+        return tuple(
+            (origin_x+offset_x, origin_y+offset_y)
+            for offset_x, offset_y in self._raster_instance_offsets_mm()
+        )
+
+    def _procedural_raster_bounds_mm(self):
+        """Physical union of all placements without composing their pixels."""
+        if self.RengData.image is None or self.job_document is None:
+            return None
+        if self.image_alignment is None and not self.job_document.fills:
+            return None
+        raster_bounds = self._effective_raster_content_bounds_mm()
+        if raster_bounds is None:
+            return None
+        offsets = self._raster_instance_offsets_mm()
+        return Bounds(
+            raster_bounds.min_x + min(item[0] for item in offsets),
+            raster_bounds.min_y + min(item[1] for item in offsets),
+            raster_bounds.max_x + max(item[0] for item in offsets),
+            raster_bounds.max_y + max(item[1] for item in offsets),
+        )
 
     def make_ui_icon(self, name, size=20, color="#0b2b5c"):
         """Cria ícones consistentes em memória usando apenas Pillow."""
@@ -393,7 +500,11 @@ class Application(Frame):
         #####
         self.master.bind('<Control-i>' , self.Initialize_Laser)
         self.master.bind('<Control-f>' , self.Unfreeze_Laser)
-        self.master.bind('<Control-o>' , self.menu_File_Open_Design)
+        self.master.bind('<Control-n>' , self.menu_Project_New)
+        self.master.bind('<Control-o>' , self.menu_Project_Open)
+        self.master.bind('<Control-s>' , self.menu_Project_Save)
+        self.master.bind('<Control-Shift-S>' , self.menu_Project_Save_As)
+        self.master.bind('<Control-Shift-O>' , self.menu_File_Open_Design)
         self.master.bind('<Control-l>' , self.menu_Reload_Design)
         self.master.bind('<Control-h>' , self.Home)
         self.master.bind('<Control-u>' , self.Unlock)
@@ -1121,7 +1232,7 @@ class Application(Frame):
         self.Entry_ContAngle = Entry()
 
         # Make Menu Bar
-        self.menuBar = Menu(self.master, relief = "raised", bd=2)
+        self.menuBar = Menu(self.master, relief="raised", bd=2, tearoff=0)
 
         
 
@@ -1151,6 +1262,8 @@ class Application(Frame):
             self.include_Time.set(1)
             self._save_configuration()
         self._enable_configuration_autosave()
+        self._enable_project_tracking()
+        self._project_ready = True
 
 
 #        opts, args = None, None
@@ -1219,41 +1332,30 @@ class Application(Frame):
         self.menuBar.delete(0, END)
 
         file_menu = Menu(self.menuBar, tearoff=0)
-        file_menu.add_command(label=tr("Recarregar desenho <Ctrl-l>", "Reload design <Ctrl-l>"),
+        file_menu.add_command(label=tr("Novo projeto <Ctrl-n>", "New project <Ctrl-n>"),
+                              command=self.menu_Project_New)
+        file_menu.add_command(label=tr("Abrir projeto <Ctrl-o>", "Open project <Ctrl-o>"),
+                              command=self.menu_Project_Open)
+        file_menu.add_command(label=tr("Salvar projeto <Ctrl-s>", "Save project <Ctrl-s>"),
+                              command=self.menu_Project_Save)
+        file_menu.add_command(label=tr("Salvar projeto como <Ctrl-Shift-s>",
+                                       "Save project as <Ctrl-Shift-s>"),
+                              command=self.menu_Project_Save_As)
+        file_menu.add_separator()
+        file_menu.add_command(label=tr("Recarregar arquivo de origem <Ctrl-l>",
+                                       "Reload source file <Ctrl-l>"),
                               command=self.menu_Reload_Design)
-        egv_menu = Menu(file_menu, tearoff=0)
-        egv_menu.add_command(label=tr("Enviar para a laser", "Send to laser"), command=self.menu_File_Open_EGV)
-        save_egv = Menu(egv_menu, tearoff=0)
-        for pt, en, command in (
-            ("Gravação raster", "Raster engraving", self.menu_File_Raster_Engrave),
-            ("Gravação vetorial", "Vector engraving", self.menu_File_Vector_Engrave),
-            ("Corte vetorial", "Vector cutting", self.menu_File_Vector_Cut),
-            ("Operações G-code", "G-code operations", self.menu_File_G_Code),
-            ("Raster e vetor", "Raster and vector", self.menu_File_Raster_Vector_Engrave),
-            ("Gravação e corte vetorial", "Vector engraving and cutting", self.menu_File_Vector_Engrave_Cut),
-            ("Raster, gravação e corte", "Raster, engraving and cutting", self.menu_File_Raster_Vector_Cut),
-        ):
-            save_egv.add_command(label=tr(pt, en), command=command)
-        egv_menu.add_cascade(label=tr("Salvar arquivo EGV", "Save EGV file"), menu=save_egv)
-        file_menu.add_cascade(label="EGV", menu=egv_menu)
         file_menu.add_separator()
         file_menu.add_command(label=tr("Sair", "Exit"), command=self.menu_File_Quit)
         self.menuBar.add_cascade(label=tr("Arquivo", "File"), menu=file_menu)
 
         view_menu = Menu(self.menuBar, tearoff=0)
         view_menu.add_command(label=tr("Atualizar <F5>", "Refresh <F5>"), command=self.menu_View_Refresh)
+        view_menu.add_command(label=tr("Contornar limite <Ctrl-t>", "Trace boundary <Ctrl-t>"),
+                              command=self.TRACE_Settings_Window)
         view_menu.add_checkbutton(label=tr("Ajustar zoom ao desenho", "Fit zoom to design"),
                                   variable=self.zoom2image, command=self.menu_View_Refresh)
         self.menuBar.add_cascade(label=tr("Visualizar", "View"), menu=view_menu)
-
-        tools_menu = Menu(self.menuBar, tearoff=0)
-        tools_menu.add_command(label=tr("Contornar limite <Ctrl-t>", "Trace boundary <Ctrl-t>"),
-                               command=self.TRACE_Settings_Window)
-        usb_menu = Menu(tools_menu, tearoff=0)
-        usb_menu.add_command(label=tr("Redefinir USB", "Reset USB"), command=self.Reset)
-        usb_menu.add_command(label=tr("Liberar USB", "Release USB"), command=self.Release_USB)
-        tools_menu.add_cascade(label="USB", menu=usb_menu)
-        self.menuBar.add_cascade(label=tr("Ferramentas", "Tools"), menu=tools_menu)
 
         settings_menu = Menu(self.menuBar, tearoff=0)
         settings_menu.add_command(label=tr("Geral e máquina <F2>", "General and machine <F2>"),
@@ -1261,6 +1363,10 @@ class Application(Frame):
         settings_menu.add_command(label=tr("Rotativo <F4>", "Rotary <F4>"), command=self.ROTARY_Settings_Window)
         settings_menu.add_command(label=tr("Trabalho e desenho <F6>", "Job and design <F6>"),
                                   command=self.JOB_Settings_Window)
+        usb_menu = Menu(settings_menu, tearoff=0)
+        usb_menu.add_command(label=tr("Redefinir USB", "Reset USB"), command=self.Reset)
+        usb_menu.add_command(label=tr("Liberar USB", "Release USB"), command=self.Release_USB)
+        settings_menu.add_cascade(label="USB", menu=usb_menu)
         presets = Menu(settings_menu, tearoff=0)
         presets.add_command(label=tr("Salvar agora", "Save now"), command=self.Save_Auto_Configuration)
         presets.add_command(label=tr("Importar configuração legada", "Import legacy settings"),
@@ -1278,7 +1384,10 @@ class Application(Frame):
 
         help_menu = Menu(self.menuBar, tearoff=0)
         help_menu.add_command(label=tr("Sobre", "About"), command=self.menu_Help_About)
-        help_menu.add_command(label=tr("Site do K40 Whisperer", "K40 Whisperer website"), command=self.menu_Help_Web)
+        help_menu.add_command(label=tr("Repositório desta versão", "This version repository"),
+                              command=self.menu_Help_Fork)
+        help_menu.add_command(label=tr("Site do projeto original", "Original project website"),
+                              command=self.menu_Help_Web)
         help_menu.add_command(label=tr("Manual", "Manual"), command=self.menu_Help_Manual)
         self.menuBar.add_cascade(label=tr("Ajuda", "Help"), menu=help_menu)
 
@@ -1515,6 +1624,241 @@ class Application(Frame):
         self._save_configuration(show_status=True)
         self.menu_View_Refresh()
 
+    def _project_setting_names(self):
+        """Settings that belong to a production job rather than the machine."""
+        return (
+            "include_Reng", "include_Veng", "include_Vcut", "include_Gcde",
+            "run_Reng", "run_Veng", "run_Vcut", "run_Gcde",
+            "Reng_feed", "Veng_feed", "Vcut_feed", "Reng_power", "Veng_power",
+            "Vcut_power", "Gcode_power", "Reng_passes", "Veng_passes",
+            "Vcut_passes", "Gcde_passes", "rast_step", "ht_size",
+            "raster_brightness", "raster_contrast", "raster_gamma",
+            "raster_dither_method", "raster_dxf_color_levels", "halftone",
+            "engraveUP", "inside_first", "comb_engrave", "comb_vector",
+            "mirror", "rotate", "negate", "inputCSYS", "preview_mode",
+        )
+
+    def _enable_project_tracking(self):
+        for name in self._project_setting_names():
+            getattr(self, name).trace_add("write", self._mark_project_dirty)
+
+    def _mark_project_dirty(self, *unused):
+        if not self._project_ready or self._project_loading:
+            return
+        self.project_dirty = True
+        self._update_window_title()
+
+    def _update_window_title(self):
+        active_file = self.PROJECT_FILE or self.DESIGN_FILE
+        if not active_file or os.path.basename(active_file) == "None":
+            active_file = "Novo projeto"
+        marker = " *" if self.project_dirty else ""
+        self.master.title("%s%s   %s" % (title_text, marker, active_file))
+
+    @staticmethod
+    def _ecoord_state(data):
+        return {
+            "ecoords": data.ecoords, "len": data.len, "move": data.move,
+            "sorted": data.sorted, "rpaths": data.rpaths,
+            "bounds": list(data.bounds), "gcode_time": data.gcode_time,
+            "hull_coords": data.hull_coords, "n_scanlines": data.n_scanlines,
+        }
+
+    @staticmethod
+    def _restore_ecoord(data, state):
+        state = state or {}
+        data.ecoords = state.get("ecoords", [])
+        data.len = state.get("len")
+        data.move = state.get("move", 0)
+        data.sorted = bool(state.get("sorted", False))
+        data.rpaths = bool(state.get("rpaths", False))
+        data.bounds = tuple(state.get("bounds", (0, 0, 0, 0)))
+        data.gcode_time = state.get("gcode_time", 0)
+        data.hull_coords = state.get("hull_coords", [])
+        data.n_scanlines = state.get("n_scanlines", 0)
+
+    @staticmethod
+    def _png_bytes(image):
+        stream = io.BytesIO()
+        image.save(stream, format="PNG", optimize=True)
+        return stream.getvalue()
+
+    def _capture_project(self):
+        settings = {
+            name: getattr(self, name).get() for name in self._project_setting_names()
+        }
+        state = {
+            "settings": settings,
+            "source_design_file": self.DESIGN_FILE,
+            "imported_image_filename": self.imported_image_filename,
+            "image_alignment": self.image_alignment,
+            "design_bounds": list(self.Design_bounds),
+            "raster_bounds_override": getattr(self, "_raster_bounds_override", None),
+            "laser_position": [self.laserX, self.laserY],
+            "position_offset": list(self.pos_offset),
+            "input_dpi": getattr(self, "input_dpi", 1000.0),
+            "source_raster_dpi": self.source_raster_dpi,
+            "legacy": {
+                "raster": self._ecoord_state(self.RengData),
+                "engrave": self._ecoord_state(self.VengData),
+                "cut": self._ecoord_state(self.VcutData),
+                "gcode": self._ecoord_state(self.GcodeData),
+            },
+        }
+        assets = {}
+        if self.RengData.image is not None:
+            assets["raster.png"] = self._png_bytes(self.RengData.image)
+        if self.imported_image_source is not None:
+            assets["source-image.png"] = self._png_bytes(self.imported_image_source)
+        return state, assets
+
+    def _confirm_discard_project(self):
+        if not self.project_dirty:
+            return True
+        english = self.language.get() == "en"
+        title = "Unsaved project" if english else "Projeto não salvo"
+        prompt = ("Save changes to the current project?" if english else
+                  "Salvar as alterações do projeto atual?")
+        if VERSION == 3:
+            answer = tkinter.messagebox.askyesnocancel(title, prompt, parent=self.master)
+        else:
+            answer = tkMessageBox.askyesnocancel(title, prompt, parent=self.master)
+        if answer is None:
+            return False
+        if answer:
+            return bool(self.menu_Project_Save())
+        return True
+
+    def menu_Project_New(self, event=None):
+        if self.GUI_Disabled or not self._confirm_discard_project():
+            return "break" if event is not None else None
+        self._project_loading = True
+        try:
+            self.resetPath()
+            self.DESIGN_FILE = self.HOME_DIR + "/None"
+            self.PROJECT_FILE = None
+            self.DXF_FILE = None
+            self.EGV_FILE = None
+            self.laserX = self.laserY = 0.0
+            self.pos_offset = [0.0, 0.0]
+            self.Align_Image_Button.configure(state=DISABLED)
+            self.project_dirty = False
+            self.SCALE = 0
+            self.menu_View_Refresh()
+        finally:
+            self._project_loading = False
+        self._update_window_title()
+        self.statusMessage.set("Novo projeto criado.")
+        return "break" if event is not None else None
+
+    def menu_Project_Open(self, event=None):
+        if self.GUI_Disabled or not self._confirm_discard_project():
+            return "break" if event is not None else None
+        filename = askopenfilename(
+            title="Abrir projeto K40",
+            initialdir=self._preferred_open_directory(),
+            filetypes=[("Projeto K40", "*.k40p"), ("Todos os arquivos", "*")],
+        )
+        if not filename:
+            return "break" if event is not None else None
+        return self._open_project_file(filename, event)
+
+    def _open_project_file(self, filename, event=None):
+        """Load an already selected project path (also useful for file associations)."""
+        try:
+            document, state, assets = load_project(filename)
+            raster_image = None
+            source_image = None
+            if "raster.png" in assets:
+                with Image.open(io.BytesIO(assets["raster.png"])) as image:
+                    raster_image = image.convert("RGBA").copy()
+            if "source-image.png" in assets:
+                with Image.open(io.BytesIO(assets["source-image.png"])) as image:
+                    source_image = image.convert("RGBA").copy()
+            self._project_loading = True
+            self.resetPath()
+            self.job_document = document
+            self.DESIGN_FILE = state.get("source_design_file") or self.HOME_DIR + "/None"
+            self.PROJECT_FILE = filename
+            self.imported_image_filename = state.get("imported_image_filename")
+            self.image_alignment = state.get("image_alignment")
+            for name, value in state.get("settings", {}).items():
+                if name in self._project_setting_names():
+                    getattr(self, name).set(value)
+            if raster_image is not None:
+                self.RengData.set_image(raster_image)
+            self.imported_image_source = source_image
+            legacy = state.get("legacy", {})
+            self._restore_ecoord(self.RengData, legacy.get("raster"))
+            self._restore_ecoord(self.VengData, legacy.get("engrave"))
+            self._restore_ecoord(self.VcutData, legacy.get("cut"))
+            self._restore_ecoord(self.GcodeData, legacy.get("gcode"))
+            self.Design_bounds = tuple(state.get("design_bounds", (0, 0, 0, 0)))
+            override = state.get("raster_bounds_override")
+            self._raster_bounds_override = tuple(override) if override is not None else None
+            self.laserX, self.laserY = state.get("laser_position", (0.0, 0.0))
+            self.pos_offset = list(state.get("position_offset", (0.0, 0.0)))
+            self.input_dpi = float(state.get("input_dpi", 1000.0))
+            self.source_raster_dpi = float(state.get("source_raster_dpi", 0.0))
+            if self.RengData.image is not None:
+                self.wim, self.him = self.RengData.image.size
+                self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
+            self.Align_Image_Button.configure(
+                state=NORMAL if self.imported_image_source is not None else DISABLED)
+            self.SCALE = 0
+            self.project_dirty = False
+            self._remember_opened_path(filename)
+            self.menu_View_Refresh(incremental=True)
+            self.statusbar.configure(bg="white")
+            self.statusMessage.set("Projeto aberto: %s" % filename)
+        except Exception as exc:
+            self.statusbar.configure(bg="red")
+            self.statusMessage.set("Não foi possível abrir o projeto: %s" % exc)
+            message_box("Projeto inválido", str(exc))
+            debug_message(traceback.format_exc())
+        finally:
+            self._project_loading = False
+        self._update_window_title()
+        return "break" if event is not None else None
+
+    def menu_Project_Save(self, event=None):
+        if not self.PROJECT_FILE:
+            return self.menu_Project_Save_As(event)
+        try:
+            state, assets = self._capture_project()
+            save_project(self.PROJECT_FILE, self.job_document, state, assets)
+            self.project_dirty = False
+            self._remember_opened_path(self.PROJECT_FILE)
+            self._update_window_title()
+            self.statusbar.configure(bg="white")
+            self.statusMessage.set("Projeto salvo: %s" % self.PROJECT_FILE)
+            return True
+        except Exception as exc:
+            self.statusbar.configure(bg="red")
+            self.statusMessage.set("Não foi possível salvar o projeto: %s" % exc)
+            message_box("Falha ao salvar projeto", str(exc))
+            debug_message(traceback.format_exc())
+            return False
+
+    def menu_Project_Save_As(self, event=None):
+        source_name = os.path.splitext(os.path.basename(self.DESIGN_FILE or "projeto"))[0]
+        filename = asksaveasfilename(
+            title="Salvar projeto K40",
+            defaultextension=".k40p",
+            initialdir=self._preferred_open_directory(),
+            initialfile=(os.path.basename(self.PROJECT_FILE) if self.PROJECT_FILE
+                         else source_name + ".k40p"),
+            filetypes=[("Projeto K40", "*.k40p")],
+        )
+        if not filename:
+            return False
+        previous = self.PROJECT_FILE
+        self.PROJECT_FILE = filename
+        if not self.menu_Project_Save():
+            self.PROJECT_FILE = previous
+            return False
+        return True
+
     def Write_Config_File(self, event):
         
         config_data = self.WriteConfig()
@@ -1665,6 +2009,12 @@ class Application(Frame):
         ######################################################
 
     def Quit_Click(self, event):
+        had_unsaved_changes = self.project_dirty
+        if not self._confirm_discard_project():
+            return
+        if not had_unsaved_changes and not message_ask_ok_cancel(
+                "Sair", "Deseja encerrar o programa?"):
+            return
         self.statusMessage.set("Saindo!")
         if getattr(self, "_config_ready", False):
             self._save_configuration()
@@ -2616,7 +2966,9 @@ class Application(Frame):
         Name, fileExtension = os.path.splitext(filename)
         TYPE=fileExtension.upper()
         if TYPE=='.DXF':
-            self.Open_DXF(filename)
+            # Recarregar a origem faz parte do projeto atual: o resultado
+            # muda, mas o caminho do .k40p deve continuar associado.
+            self.Open_DXF(filename, preserve_project=True)
             return
         elif TYPE=='.SVG':
             self.Open_SVG(filename)
@@ -2624,12 +2976,15 @@ class Application(Frame):
             self.EGV_Send_Window(filename)
         else:
             self.Open_G_Code(filename)
+        self._mark_project_dirty()
         self.menu_View_Refresh()
         
         
 
     def menu_File_Open_Design(self,event=None):
         if self.GUI_Disabled:
+            return
+        if not self._confirm_discard_project():
             return
         init_dir = self._preferred_open_directory()
 
@@ -2668,6 +3023,8 @@ class Application(Frame):
 
             
         self.DESIGN_FILE = fileselect
+        self.PROJECT_FILE = None
+        self._mark_project_dirty()
         self.menu_View_Refresh()
 
     def menu_File_Import_Image(self, event=None):
@@ -2695,6 +3052,7 @@ class Application(Frame):
             self.imported_image_filename = filename
             self.image_alignment = None
             self.Align_Image_Button.configure(state=NORMAL)
+            self._mark_project_dirty()
             self.IMAGE_ALIGNMENT_Window()
         except Exception as exc:
             self.statusbar.configure(bg="red")
@@ -2763,6 +3121,14 @@ class Application(Frame):
 
         def vector_frame():
             """Return the actual vector bounds, never the expanded raster page."""
+            # The alignment belongs to the source piece, not to the extents of
+            # a procedural array that may already be active.
+            canonical = editable_bounds(self.job_document) if self.job_document else None
+            if canonical is not None:
+                return (
+                    canonical.min_x/25.4, canonical.max_x/25.4,
+                    canonical.min_y/25.4, canonical.max_y/25.4,
+                )
             points = [point for data in (self.VengData, self.VcutData)
                       for point in data.ecoords]
             if points:
@@ -3229,6 +3595,11 @@ class Application(Frame):
             # vetores precisam subir no sistema interno para permanecerem na
             # mesma posição visual exibida pela janela de alinhamento.
             vector_shift_y = canvas_h - padding_y - vector_h
+            previous_alignment = self.image_alignment or {}
+            previous_vector_x = float(previous_alignment.get("vector_offset_x_mm", 0.0))
+            previous_vector_y = float(previous_alignment.get("vector_offset_y_mm", 0.0))
+            vector_delta_x = padding_x-previous_vector_x
+            vector_delta_y = vector_shift_y-previous_vector_y
             composed = Image.new("RGBA", (max(1, int(round(canvas_w/25.4*dpi))),
                                            max(1, int(round(canvas_h/25.4*dpi)))),
                                  (255, 255, 255, 0))
@@ -3241,17 +3612,17 @@ class Application(Frame):
                 ImageDraw.Draw(mask).polygon(mask_points, fill=255)
                 alpha = composed.getchannel("A")
                 composed.putalpha(Image.composite(alpha, Image.new("L", composed.size, 0), mask))
-            if padding_x or padding_y:
+            if vector_delta_x or vector_delta_y:
                 for dataset in (self.VengData, self.VcutData):
                     for point in dataset.ecoords:
-                        point[0] += padding_x/25.4
-                        point[1] += vector_shift_y/25.4
+                        point[0] += vector_delta_x/25.4
+                        point[1] += vector_delta_y/25.4
                     dataset.computeEcoordsLen()
-            elif vector_shift_y:
-                for dataset in (self.VengData, self.VcutData):
-                    for point in dataset.ecoords:
-                        point[1] += vector_shift_y/25.4
-                    dataset.computeEcoordsLen()
+                if self.job_document is not None:
+                    apply_document_transform(
+                        self.job_document,
+                        AffineTransform(e=vector_delta_x, f=vector_delta_y),
+                    )
             self.RengData.set_image(composed)
             self.include_Reng.set(1)
             self.SCALE = 0
@@ -3269,12 +3640,39 @@ class Application(Frame):
                 "nudge_step": float(nudge_step.get().replace(",", ".")),
                 "reference": reference.get(),
                 "mask_points": selected_mask[0],
+                "vector_offset_x_mm": padding_x,
+                "vector_offset_y_mm": vector_shift_y,
             }
+            previous_arrays = list(self.job_document.arrays) if self.job_document else []
+            if previous_arrays:
+                effective_bounds = self._source_piece_bounds_mm(self.job_document)
+                self.job_document.arrays[:] = [
+                    replace(item, reference_bounds=effective_bounds)
+                    for item in self.job_document.arrays
+                ]
+                self.job_document.validate()
+            complete_bounds = Bounds.union((
+                self.job_document.bounds if self.job_document else None,
+                self._procedural_raster_bounds_mm(),
+            ))
+            if complete_bounds is not None:
+                self.Design_bounds = (
+                    complete_bounds.min_x/25.4, complete_bounds.max_x/25.4,
+                    complete_bounds.min_y/25.4, complete_bounds.max_y/25.4,
+                )
             self.Align_Image_Button.configure(state=NORMAL)
             self.statusbar.configure(bg="white")
             self.statusMessage.set("Imagem alinhada e anexada ao raster.")
-            self.menu_View_Refresh()
+            self._mark_project_dirty()
             dialog.destroy()
+            if previous_arrays:
+                self._rebuild_array_legacy_data(
+                    previous_arrays,
+                    progress_message="Atualizando instâncias da imagem...",
+                    success_message="Imagem e instâncias atualizadas.",
+                )
+            else:
+                self.menu_View_Refresh()
 
         def select_mask():
             mask_selecting[0] = True
@@ -3655,6 +4053,9 @@ class Application(Frame):
                         self.master.update(),
                     ),
                 )
+                scanlines = repeat_scanlines(
+                    scanlines, self._raster_route_offsets_mm()
+                )
                 del image_temp
                 ecoords = scanlines.ecoords
                 hcoords = scanlines.hull_points
@@ -3744,6 +4145,9 @@ class Application(Frame):
                 cutoff=128, cancelled=lambda: self.stop[0],
                 progress=lambda percent: self.raster_time_queue.put(("progress", percent)),
                 collect_coords=False, collect_hull=False,
+            )
+            scanlines = repeat_scanlines(
+                scanlines, self._raster_route_offsets_mm()
             )
             self.raster_time_queue.put(("complete", scanlines))
         except Exception as exc:
@@ -3929,7 +4333,7 @@ class Application(Frame):
         self.Design_bounds = self.GcodeData.bounds
 
         
-    def Open_DXF(self,filemname):
+    def Open_DXF(self, filemname, preserve_project=False):
         if self.dxf_import_thread is not None and self.dxf_import_thread.is_alive():
             self.statusMessage.set("Já existe uma importação DXF em andamento.")
             return
@@ -3981,7 +4385,10 @@ class Application(Frame):
                 vcut_data.make_ecoords(imported.cut, scale=1.0)
                 veng_data.make_ecoords(imported.engrave, scale=1.0)
                 self.dxf_import_queue.put(
-                    ("complete", (filemname, imported, vcut_data, veng_data))
+                    ("complete", (
+                        filemname, imported, vcut_data, veng_data,
+                        preserve_project,
+                    ))
                 )
             except Exception as exc:
                 from k40core.importing import ImportCancelled
@@ -4026,10 +4433,12 @@ class Application(Frame):
                     payload["value"] = dialog.result
                     payload["event"].set()
                 elif event == "complete":
-                    filename, imported, vcut_data, veng_data = payload
+                    filename, imported, vcut_data, veng_data, preserve_project = payload
                     self.resetPath()
                     self.DXF_FILE = filename
                     self.DESIGN_FILE = filename
+                    if not preserve_project:
+                        self.PROJECT_FILE = None
                     self.VcutData = vcut_data
                     self.VengData = veng_data
                     self.job_document = imported.document
@@ -4044,6 +4453,7 @@ class Application(Frame):
                     self.statusbar.configure(bg='white')
                     object_count = len(imported.document.vectors) + len(imported.document.fills)
                     self.statusMessage.set("")
+                    self._mark_project_dirty()
                     self.menu_View_Refresh(incremental=True)
                     if imported.warnings:
                         message_box("Importação de DXF:", "\n".join(imported.warnings))
@@ -4490,10 +4900,12 @@ class Application(Frame):
         if self.k40 == None:
             self.laserX  = Xnew
             self.laserY  = Ynew
+            self._mark_project_dirty()
             self._move_preview_by_anchor_delta(dxmils/1000.0, dymils/1000.0)
         elif self.Send_Rapid_Move(dxmils,dymils):
             self.laserX  = Xnew
             self.laserY  = Ynew
+            self._mark_project_dirty()
             self._move_preview_by_anchor_delta(dxmils/1000.0, dymils/1000.0)
         
 
@@ -4557,11 +4969,10 @@ class Application(Frame):
             self.GUI_Disabled=True
 
         try:
-            self.menuBar.entryconfigure("Arquivo", state=new_state)
-            self.menuBar.entryconfigure("Visualizar", state=new_state)
-            self.menuBar.entryconfigure("Ferramentas", state=new_state)
-            self.menuBar.entryconfigure("Configurações", state=new_state)
-            self.menuBar.entryconfigure("Ajuda", state=new_state)
+            last_menu = self.menuBar.index(END)
+            if last_menu is not None:
+                for menu_index in range(last_menu + 1):
+                    self.menuBar.entryconfigure(menu_index, state=new_state)
             self.PreviewCanvas.configure(state=new_state)
             
             for w in self.master.winfo_children():
@@ -5192,6 +5603,144 @@ class Application(Frame):
             feed_factor = 1.0
         return feed_factor
 
+    @staticmethod
+    def _append_egv_chunk(data, chunk, passes=1):
+        """Append self-contained EGV while keeping one continuous job stream."""
+        for unused in range(max(0, int(float(passes)))):
+            if len(data) > 4:
+                data[-4] = ord("@")
+            data.extend(chunk)
+
+    def _send_array_by_instance(self, operation_type, output_filename,
+                                startx, starty, flip_x_offset,
+                                rapid_feed, feed_factor):
+        """Generate a procedural array in piece order.
+
+        The canonical vector geometry is tessellated and optimized only once.
+        Each placement receives a lightweight coordinate translation. Raster
+        scanlines are likewise split from the shared bitmap route rather than
+        regenerating or composing a bitmap for every copy.
+        """
+        document = self.job_document
+        if (document is None or not document.arrays or self.display_power
+                or "Trace_Eng" in operation_type or "Gcode_Cut" in operation_type):
+            return False
+        array = document.arrays[0]
+        if array.execution_order != "by_instance":
+            return False
+
+        placements = document_instance_offsets(document)
+        if not placements:
+            return False
+
+        self.statusMessage.set("Preparando EGV procedural por instância...")
+        self.master.update()
+        base_document = replace(document, arrays=[])
+        vector_bases = {}
+        vector_specs = (
+            ("Vector_Eng", Operation.VECTOR_ENGRAVE, False),
+            ("Vector_Cut", Operation.VECTOR_CUT, True),
+        )
+        for name, operation, inside_check in vector_specs:
+            if name not in operation_type:
+                continue
+            lines = vector_lines_in_inches(base_document, operation)
+            coordinates = ECoord()
+            coordinates.make_ecoords(lines, scale=1.0)
+            if coordinates.ecoords and self.inside_first.get():
+                coordinates.set_ecoords(
+                    self.optimize_paths(coordinates.ecoords,
+                                        inside_check=inside_check),
+                    data_sorted=True,
+                )
+            vector_bases[name] = coordinates.ecoords
+
+        raster_chunks = ()
+        if "Raster_Eng" in operation_type and self.RengData.ecoords:
+            raster_count = len(self._raster_instance_offsets_mm())
+            raster_chunks = split_repeated_ecoords(
+                self.RengData.ecoords, raster_count
+            )
+
+        if not vector_bases and not raster_chunks:
+            return False
+
+        data = [ord("I")]
+        board_name = self.board_name.get()
+        y_scale = float(self.LaserYscale.get())
+        if self.rotary.get():
+            y_scale *= float(self.LaserRscale.get())
+
+        def make_segment(coords, feed, raster_step=0, raster=False):
+            segment = []
+            segment_startx = 0 if raster else startx
+            segment_starty = y_scale * starty if raster else starty
+            prepared = coords
+            if not raster:
+                if self.mirror.get() or self.rotate.get():
+                    prepared = self.mirror_rotate_vector_coords(prepared)
+                prepared, segment_startx, segment_starty = self.scale_vector_coords(
+                    prepared, segment_startx, segment_starty
+                )
+            generator = egv(target=lambda value: segment.append(value))
+            generator.make_egv_data(
+                prepared,
+                startX=segment_startx,
+                startY=segment_starty,
+                Feed=feed,
+                board_name=board_name,
+                Raster_step=raster_step,
+                update_gui=self.update_gui,
+                stop_calc=self.stop,
+                FlipXoffset=flip_x_offset,
+                Rapid_Feed_Rate=rapid_feed,
+                use_laser=True,
+            )
+            return (generator.strip_redundant_codes(segment)
+                    if raster else segment)
+
+        # The route offsets and vector placements share the same active array
+        # order. A native SVG bitmap that is intentionally not array-bound has
+        # one raster chunk and therefore remains attached only to the first job.
+        for placement_position, (grid_index, dx_mm, dy_mm) in enumerate(placements):
+            self.statusMessage.set(
+                "Gerando EGV da peça %d de %d..." %
+                (placement_position + 1, len(placements))
+            )
+            self.master.update()
+            if raster_chunks and placement_position < len(raster_chunks):
+                raster_step = self.get_raster_step_1000in()
+                if not self.engraveUP.get():
+                    raster_step = -raster_step
+                segment = make_segment(
+                    raster_chunks[placement_position],
+                    float(self.Reng_feed.get()) * feed_factor,
+                    raster_step=raster_step,
+                    raster=True,
+                )
+                self._append_egv_chunk(data, segment, self.Reng_passes.get())
+
+            for name, feed_variable, passes_variable in (
+                    ("Vector_Eng", self.Veng_feed, self.Veng_passes),
+                    ("Vector_Cut", self.Vcut_feed, self.Vcut_passes)):
+                base = vector_bases.get(name)
+                if not base:
+                    continue
+                placed = translate_ecoords(base, dx_mm / 25.4, dy_mm / 25.4)
+                segment = make_segment(
+                    placed, float(feed_variable.get()) * feed_factor
+                )
+                self._append_egv_chunk(data, segment, passes_variable.get())
+
+        if len(data) < 4:
+            raise Exception("Nenhum dado EGV foi gerado para as instâncias.")
+        if output_filename is not None:
+            self.write_egv_to_file(data, output_filename)
+        else:
+            self.send_egv_data(data, 1, power_level=None)
+            self.menu_View_Refresh()
+        return True
+
   
     def send_data(self,operation_type=None, output_filename=None):
         num_passes=0
@@ -5249,6 +5798,11 @@ class Application(Frame):
                 Rapid_Feed = float(self.rapid_feed.get())*feed_factor
             else:
                 Rapid_Feed = 0.0
+
+            if self._send_array_by_instance(
+                    operation_type, output_filename, startx, starty,
+                    FlipXoffset, Rapid_Feed, feed_factor):
+                return
                 
             Raster_Eng_data=[]
             Vector_Eng_data=[]
@@ -5650,6 +6204,7 @@ class Application(Frame):
         self.laserX  = 0.0
         self.laserY  = 0.0
         self.pos_offset = [0.0,0.0]
+        self._mark_project_dirty()
         self.menu_View_Refresh()
 
     def GoTo(self, event=None):
@@ -5840,8 +6395,7 @@ class Application(Frame):
     ##########################################################################
             
     def menu_File_Quit(self):
-        if message_ask_ok_cancel("Sair", "Deseja encerrar o programa?"):
-            self.Quit_Click(None)
+        self.Quit_Click(None)
 
     def Reset_RasterPath_and_Update_Time(self, varName=0, index=0, mode=0):
         self.RengData.reset_path()
@@ -5884,10 +6438,7 @@ class Application(Frame):
             calframe = inspect.getouterframes(curframe, 2)
             print('menu_View_Refresh called by: %s' %(calframe[1][3]))
 
-        try:
-            self.master.title(title_text+"   "+ self.DESIGN_FILE)
-        except:
-            pass
+        self._update_window_title()
         dummy_event = Event()
         dummy_event.widget=self.master
         self.Master_Configure(dummy_event,1)
@@ -6013,12 +6564,23 @@ class Application(Frame):
         
 
     def menu_Help_About(self):
-        application="K40 Whisperer"
+        application="K40 Whisperer PT-BR - DXF refatorado"
         about = "%s Version %s\n\n" %(application,version)
-        about = about + "By Scorch.\n"
+        if self.language.get() == "en":
+            about += ("This version was developed from the original K40 Whisperer, "
+                      "distributed under the GNU GPL v3 license.\n\n"
+                      "Original software by Scorch (Stephen Houser).\n")
+        else:
+            about += ("Esta versão foi desenvolvida a partir do K40 Whisperer original, "
+                      "distribuído sob a licença GNU GPL v3.\n\n"
+                      "Programa original por Scorch (Stephen Houser).\n")
         about = about + "\163\143\157\162\143\150\100\163\143\157\162"
         about = about + "\143\150\167\157\162\153\163\056\143\157\155\n"
         about = about + "https://www.scorchworks.com/\n\n"
+        about += ("PT-BR refactoring, DXF import and new features: LauckGui.\n"
+                  if self.language.get() == "en" else
+                  "Refatoração PT-BR, importação DXF e novos recursos: LauckGui.\n")
+        about = about + "https://github.com/LauckGui/k40-whisperer-ptbr-dxf\n\n"
         try:
             python_version = "%d.%d.%d" %(sys.version_info.major,sys.version_info.minor,sys.version_info.micro)
         except:
@@ -6028,6 +6590,9 @@ class Application(Frame):
 
     def menu_Help_Web(self):
         webbrowser.open_new(r"https://www.scorchworks.com/K40whisperer/k40whisperer.html")
+
+    def menu_Help_Fork(self):
+        webbrowser.open_new(r"https://github.com/LauckGui/k40-whisperer-ptbr-dxf")
 
     def menu_Help_Manual(self):
         webbrowser.open_new(r"https://www.scorchworks.com/K40whisperer/k40w_manual.html")
@@ -6992,7 +7557,29 @@ class Application(Frame):
                     self.SCALE = 1
                     debug_message(traceback.format_exc())
                     
-                self.Plot_Raster(self.laserX+.001, self.laserY-.001, x_lft,y_top,self.PlotScale,im=self.UI_image)
+                # Reuse one Tk bitmap for all procedural placements instead of
+                # allocating one enormous composed image.
+                canvas_bounds = self._raster_canvas_bounds_mm()
+                overall_bounds = Bounds.union((
+                    self.job_document.bounds if self.job_document else None,
+                    self._procedural_raster_bounds_mm(),
+                ))
+                if canvas_bounds is not None and overall_bounds is not None:
+                    preview_offsets = preview_bitmap_offsets(
+                        canvas_bounds, overall_bounds,
+                        self._raster_instance_offsets_mm(),
+                    )
+                    for offset_x_mm, offset_y_mm in preview_offsets:
+                        self.Plot_Raster(
+                            self.laserX+.001+offset_x_mm/25.4,
+                            self.laserY-.001+offset_y_mm/25.4,
+                            x_lft, y_top, self.PlotScale, im=self.UI_image,
+                        )
+                else:
+                    self.Plot_Raster(
+                        self.laserX+.001, self.laserY-.001,
+                        x_lft, y_top, self.PlotScale, im=self.UI_image,
+                    )
         else:
             self.UI_image = None
 
@@ -7322,6 +7909,8 @@ class Application(Frame):
             if self.Send_Rapid_Move( xdist,ydist ):
                 old_pos_offset = self.pos_offset
                 self.pos_offset = new_pos_offset
+                if self.pos_offset != old_pos_offset:
+                    self._mark_project_dirty()
                 self._move_preview_dot_by_offset_delta(
                     (new_pos_offset[0] - old_pos_offset[0]) / 1000.0,
                     (new_pos_offset[1] - old_pos_offset[1]) / 1000.0,
@@ -7329,6 +7918,8 @@ class Application(Frame):
         else:      
             old_pos_offset = self.pos_offset
             self.pos_offset = new_pos_offset
+            if self.pos_offset != old_pos_offset:
+                self._mark_project_dirty()
             self._move_preview_dot_by_offset_delta(
                 (new_pos_offset[0] - old_pos_offset[0]) / 1000.0,
                 (new_pos_offset[1] - old_pos_offset[1]) / 1000.0,
@@ -7348,7 +7939,7 @@ class Application(Frame):
 
         document = self.job_document
         base_objects = [*document.vectors, *document.fills, *document.rasters]
-        base_bounds = Bounds.union(item.bounds for item in base_objects)
+        base_bounds = self._source_piece_bounds_mm(document)
         if base_bounds is None or base_bounds.width <= 0.0 or base_bounds.height <= 0.0:
             self.statusMessage.set("O desenho atual não possui dimensões válidas para um array.")
             return
@@ -7374,6 +7965,10 @@ class Application(Frame):
         row_adjust_y = StringVar(value="%.3f" % (
             existing.row_adjust_y_mm if existing else 0.0
         ))
+        complete_each_instance = BooleanVar(value=(
+            existing.execution_order == "by_instance" if existing else False
+        ))
+        disabled_indices = set(existing.disabled_indices if existing else ())
         summary = StringVar()
         warning = StringVar()
 
@@ -7386,6 +7981,11 @@ class Application(Frame):
             side=LEFT, padx=(4, 30))
         Radiobutton(mode_frame, text="Zig-zag compacto", variable=mode,
                     value="staggered").pack(side=LEFT)
+        Checkbutton(
+            mode_frame,
+            text="Concluir cada peça antes da próxima",
+            variable=complete_each_instance,
+        ).pack(side=RIGHT, padx=4)
 
         values = LabelFrame(container, text="Distribuição", padx=8, pady=5)
         values.pack(fill=X, pady=(0, 5))
@@ -7416,6 +8016,8 @@ class Application(Frame):
         preview = Canvas(container, width=650, height=345, bg="#c8c8c8",
                          highlightthickness=1, highlightbackground="#9aa0a6")
         preview.pack(fill=X, pady=(0, 7))
+        Label(container, text="Clique numa peça da prévia para ignorar/reativar.",
+              fg="#4b5563", anchor=W).pack(fill=X)
         Label(container, textvariable=summary, anchor=W).pack(fill=X)
         warning_label = Label(container, textvariable=warning, anchor=W, fg="#b42318")
         warning_label.pack(fill=X, pady=(2, 7))
@@ -7430,11 +8032,22 @@ class Application(Frame):
                 raise ValueError("Linhas e colunas precisam ser maiores que zero.")
             if column_count*row_count > 10000:
                 raise ValueError("O limite desta versão é de 10.000 cópias.")
+            valid_disabled = tuple(sorted(
+                index for index in disabled_indices
+                if 0 <= index < column_count*row_count
+            ))
+            if len(valid_disabled) >= column_count*row_count:
+                disabled_indices.discard(valid_disabled[-1])
+                valid_disabled = valid_disabled[:-1]
             return InstanceArray(
                 "array:main", tuple(item.id for item in base_objects),
                 columns=column_count, rows=row_count, spacing_mm=gap,
                 mode=mode.get(), stagger_x_mm=stagger,
                 row_adjust_y_mm=adjust_y,
+                disabled_indices=valid_disabled,
+                reference_bounds=base_bounds,
+                execution_order=("by_instance" if complete_each_instance.get()
+                                 else "by_process"),
             )
 
         def refresh_preview(*unused):
@@ -7445,7 +8058,9 @@ class Application(Frame):
             try:
                 array = values_from_ui()
                 from k40core.arrays import instance_offsets
-                offsets = list(instance_offsets(array, base_bounds))
+                offsets = list(instance_offsets(
+                    array, base_bounds, include_disabled=True
+                ))
                 result_bounds = instance_array_bounds(
                     array, {item.id: item.bounds for item in base_objects}
                 )
@@ -7464,24 +8079,46 @@ class Application(Frame):
                     area_left, area_top, area_left+area_width, area_top+area_height,
                     fill="#ededed", outline="#59636e", width=2,
                 )
-                shown = offsets[:500]
-                for offset_x, offset_y in shown:
+                shown = list(enumerate(offsets[:500]))
+                for instance_index, (offset_x, offset_y) in shown:
                     x0 = area_left+(base_bounds.min_x+offset_x-result_bounds.min_x)/scale
                     y0 = area_top+(base_bounds.min_y+offset_y-result_bounds.min_y)/scale
                     x1 = area_left+(base_bounds.max_x+offset_x-result_bounds.min_x)/scale
                     y1 = area_top+(base_bounds.max_y+offset_y-result_bounds.min_y)/scale
-                    preview.create_rectangle(x0, y0, x1, y1, outline="#b42318")
+                    ignored = instance_index in disabled_indices
+                    preview.create_rectangle(
+                        x0, y0, x1, y1,
+                        fill="#d1d5db" if ignored else "#fff7f7",
+                        outline="#6b7280" if ignored else "#b42318",
+                        width=2 if ignored else 1,
+                        tags=("array_instance", "instance:%d" % instance_index),
+                    )
+                    if ignored:
+                        preview.create_line(
+                            x0, y0, x1, y1, fill="#6b7280", width=2,
+                            tags=("array_instance", "instance:%d" % instance_index),
+                        )
+                        preview.create_line(
+                            x0, y1, x1, y0, fill="#6b7280", width=2,
+                            tags=("array_instance", "instance:%d" % instance_index),
+                        )
                 total = array.columns*array.rows
+                active = total-len(array.disabled_indices)
                 step_x, step_y = array_steps(array, base_bounds)
                 summary.set(
-                    "%d cópias | passo X %.2f mm | passo Y %.2f mm | área %.2f × %.2f mm" %
-                    (total, step_x, step_y, result_bounds.width, result_bounds.height)
+                    "%d ativas de %d | passo X %.2f mm | passo Y %.2f mm | área %.2f × %.2f mm" %
+                    (active, total, step_x, step_y,
+                     result_bounds.width, result_bounds.height)
                 )
                 messages = []
                 if result_bounds.width > machine_width or result_bounds.height > machine_height:
                     messages.append("O array ultrapassa a área útil configurada.")
                 if total > len(shown):
                     messages.append("Prévia simplificada às primeiras 500 cópias.")
+                if array.disabled_indices:
+                    messages.append("%d instância(s) serão ignoradas." % len(array.disabled_indices))
+                if array.execution_order == "by_instance":
+                    messages.append("Execução: raster, gravação e corte de cada peça.")
                 warning.set(" ".join(messages))
                 return array
             except (ValueError, TypeError) as exc:
@@ -7503,6 +8140,7 @@ class Application(Frame):
                 )
                 columns.set(str(calculated[0]))
                 rows.set(str(calculated[1]))
+                disabled_indices.clear()
                 refresh_preview()
             except (ValueError, TypeError) as exc:
                 warning.set(str(exc))
@@ -7514,6 +8152,32 @@ class Application(Frame):
                 row_adjust_y.set("0.000")
             except ValueError:
                 warning.set("Informe um espaçamento válido.")
+
+        def toggle_instance(event):
+            current = preview.find_withtag("current")
+            if not current:
+                return
+            index = None
+            for tag in preview.gettags(current[0]):
+                if tag.startswith("instance:"):
+                    index = int(tag.split(":", 1)[1])
+                    break
+            if index is None:
+                return
+            try:
+                total = int(columns.get())*int(rows.get())
+            except ValueError:
+                return
+            if index in disabled_indices:
+                disabled_indices.remove(index)
+            elif total-len(disabled_indices) > 1:
+                disabled_indices.add(index)
+            else:
+                warning.set("O array precisa manter ao menos uma instância ativa.")
+                return
+            refresh_preview()
+
+        preview.bind("<Button-1>", toggle_instance)
 
         def apply():
             array = refresh_preview()
@@ -7542,7 +8206,8 @@ class Application(Frame):
             side=RIGHT, padx=6)
         Button(controls, text="Remover cópias", width=14, command=remove).pack(side=RIGHT)
 
-        for variable in (mode, columns, rows, spacing, stagger_x, row_adjust_y):
+        for variable in (mode, columns, rows, spacing, stagger_x, row_adjust_y,
+                         complete_each_instance):
             trace_variable(variable, refresh_preview)
         refresh_preview()
 
@@ -7785,7 +8450,8 @@ class Application(Frame):
         if self.job_document is None or self.array_build_thread is not None:
             return False
         document = self.job_document
-        previous = (list(document.vectors), list(document.rasters), list(document.fills))
+        previous = (list(document.vectors), list(document.rasters),
+                    list(document.fills), list(document.arrays))
         previous_image = (self.RengData.image.copy() if self.RengData.image is not None else None)
         previous_source = (self.imported_image_source.copy()
                            if self.imported_image_source is not None else None)
@@ -7793,7 +8459,8 @@ class Application(Frame):
         previous_bounds_override = getattr(self, "_raster_bounds_override", None)
 
         def rollback():
-            document.vectors[:], document.rasters[:], document.fills[:] = previous
+            (document.vectors[:], document.rasters[:], document.fills[:],
+             document.arrays[:]) = previous
             document.validate()
             self.imported_image_source = previous_source
             self.image_alignment = previous_alignment
@@ -7806,6 +8473,7 @@ class Application(Frame):
         try:
             apply_document_transform(document, transform)
             self._transform_aligned_raster(document, transform)
+            self._mark_project_dirty()
         except Exception:
             rollback()
             raise
@@ -7896,6 +8564,8 @@ class Application(Frame):
                 "nudge_step": 0.5,
                 "reference": "Superior esquerdo",
                 "mask_points": None,
+                "vector_offset_x_mm": vector_bounds.min_x-new_min_x,
+                "vector_offset_y_mm": vector_bounds.min_y-new_min_y,
             }
 
     def _rebuild_array_legacy_data(self, previous_arrays=None, rollback=None,
@@ -7918,6 +8588,9 @@ class Application(Frame):
         self.document_rebuild_failure_message = failure_message
         self.document_rebuild_on_complete = on_complete
         document = self.job_document
+        has_attached_bitmap = (
+            self.image_alignment is not None and self.RengData.image is not None
+        )
 
         def worker():
             try:
@@ -7928,12 +8601,16 @@ class Application(Frame):
                 engrave_data.make_ecoords(engrave_lines, scale=1.0)
                 requested_raster_dpi = self.source_raster_dpi or self.input_dpi
                 raster_dpi = requested_raster_dpi
-                if document.fills:
+                if document.fills and not has_attached_bitmap:
+                    base_bounds = Bounds.union(item.bounds for item in [
+                        *document.vectors, *document.rasters, *document.fills,
+                    ])
                     raster_dpi = dpi_for_pixel_budget(
-                        document.bounds, requested_raster_dpi, 50_000_000
+                        base_bounds, requested_raster_dpi, 50_000_000
                     )
                     raster_image = rasterize_fills(
-                        document, raster_dpi, maximum_pixels=50_000_000,
+                        document, raster_dpi, bounds=base_bounds,
+                        maximum_pixels=50_000_000, include_arrays=False,
                         color_intensities=(
                             color_intensities_from_document(document)
                             if self.raster_dxf_color_levels.get() else None
@@ -7991,6 +8668,11 @@ class Application(Frame):
             self.wim, self.him = raster_image.size
             self.aspect_ratio = float(self.wim-1) / float(max(1, self.him-1))
             self.SCALE = 0
+        elif self.RengData.image is not None:
+            # Keep the attached bitmap and invalidate only calculated paths;
+            # copies are represented by lightweight placement offsets.
+            self.RengData.reset_path()
+            self.SCALE = 0
         self.array_previous_arrays = None
         success_message = self.document_rebuild_success_message
         on_complete = self.document_rebuild_on_complete
@@ -7998,7 +8680,8 @@ class Application(Frame):
         self.document_rebuild_success_message = None
         self.document_rebuild_failure_message = None
         self.document_rebuild_on_complete = None
-        bounds = self.job_document.bounds
+        bounds = Bounds.union((self.job_document.bounds,
+                               self._procedural_raster_bounds_mm()))
         raster_bounds = getattr(self, "_raster_bounds_override", None)
         if raster_bounds is not None:
             self.Design_bounds = tuple(value/25.4 for value in raster_bounds)
@@ -8008,9 +8691,14 @@ class Application(Frame):
                 bounds.min_x/25.4, bounds.max_x/25.4,
                 bounds.min_y/25.4, bounds.max_y/25.4,
             )
-        total = (self.job_document.arrays[0].columns*self.job_document.arrays[0].rows
-                 if self.job_document.arrays else 1)
+        if self.job_document.arrays:
+            active_array = self.job_document.arrays[0]
+            total = (active_array.columns*active_array.rows
+                     - len(active_array.disabled_indices))
+        else:
+            total = 1
         self.statusbar.configure(bg='white')
+        self._mark_project_dirty()
         if success_message is not None:
             if raster_image is not None and raster_dpi < previous_raster_dpi-0.01:
                 success_message += " Raster ajustado para %.0f DPI." % raster_dpi
@@ -8084,7 +8772,7 @@ class Application(Frame):
     ################################################################################
     #                         General Settings Window                              #
     ################################################################################
-    def GEN_Settings_Window(self):
+    def _GEN_Settings_Window_Legacy(self):
         gen_width = 700
         gen_settings = Toplevel(width=gen_width, height=700) #460+75)
         gen_settings.grab_set() # Use grab_set to prevent user input in the main window
@@ -8378,6 +9066,141 @@ class Application(Frame):
         self.GEN_Close.bind("<ButtonRelease-1>", self.Close_Current_Window_Click)
 
         self.Set_Input_States_BATCH()
+
+    def GEN_Settings_Window(self):
+        """Compact, grouped machine and application settings."""
+        window = Toplevel(self.master)
+        window.title("Configurações gerais e da máquina")
+        window.iconname("General Settings")
+        window.geometry("720x640")
+        window.minsize(680, 590)
+        window.resizable(True, True)
+        window.transient(self.master)
+        window.grab_set()
+        window.focus_set()
+        self._bind_escape_close(window)
+
+        container = Frame(window, padx=12, pady=10)
+        container.pack(fill=BOTH, expand=True)
+        container.columnconfigure(0, weight=1)
+
+        workflow = LabelFrame(container, text="Aplicativo e fluxo de trabalho", padx=10, pady=8)
+        workflow.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        workflow.columnconfigure(1, weight=1)
+        Label(workflow, text="Unidades", anchor=W).grid(row=0, column=0, sticky="w", pady=3)
+        unit_row = Frame(workflow)
+        unit_row.grid(row=0, column=1, sticky="w")
+        Radiobutton(unit_row, text="polegadas", value="in", variable=self.units,
+                    command=self.Entry_units_var_Callback).pack(side=LEFT)
+        Radiobutton(unit_row, text="mm", value="mm", variable=self.units,
+                    command=self.Entry_units_var_Callback).pack(side=LEFT, padx=(10, 0))
+        Checkbutton(workflow, text="Ir à origem ao inicializar", variable=self.init_home,
+                    anchor=W).grid(row=1, column=0, columnspan=2, sticky="w", pady=3)
+
+        post = LabelFrame(workflow, text="Após concluir o trabalho", padx=8, pady=5)
+        post.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        for column in range(3):
+            post.columnconfigure(column, weight=1)
+        Checkbutton(post, text="Liberar eixos", variable=self.post_home).grid(
+            row=0, column=0, sticky="w")
+        Checkbutton(post, text="Emitir som", variable=self.post_beep).grid(
+            row=0, column=1, sticky="w")
+        Checkbutton(post, text="Exibir relatório", variable=self.post_disp).grid(
+            row=0, column=2, sticky="w")
+
+        def update_batch_state():
+            self.Entry_Batch_Path.configure(state=NORMAL if self.post_exec.get() else DISABLED)
+
+        Checkbutton(post, text="Executar arquivo em lote", variable=self.post_exec,
+                    command=update_batch_state).grid(row=1, column=0, sticky="w", pady=(5, 0))
+        self.Entry_Batch_Path = Entry(post, textvariable=self.batch_path)
+        self.Entry_Batch_Path.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(5, 0))
+        update_batch_state()
+
+        performance = Frame(workflow)
+        performance.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+        performance.columnconfigure(0, weight=1)
+        performance.columnconfigure(1, weight=1)
+        Checkbutton(performance, text="Pré-processar dados CRC", variable=self.pre_pr_crc,
+                    anchor=W).grid(row=0, column=0, sticky="w")
+        Checkbutton(performance, text="Aguardar a laser concluir", variable=self.wait,
+                    anchor=W).grid(row=0, column=1, sticky="w")
+        Checkbutton(performance, text="Reduzir uso de memória", variable=self.reduced_mem,
+                    anchor=W).grid(
+                        row=1, column=0, sticky="w", pady=(4, 0))
+
+        machine = LabelFrame(container, text="Máquina e área de trabalho", padx=10, pady=8)
+        machine.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        machine.columnconfigure(1, weight=1)
+
+        def machine_entry(row, label, variable, callback, units=None):
+            Label(machine, text=label, anchor=W).grid(row=row, column=0, sticky="w", pady=3)
+            entry = Entry(machine, textvariable=variable, width=15, justify=CENTER)
+            entry.grid(row=row, column=1, sticky="w", pady=3)
+            if units is not None:
+                Label(machine, textvariable=units, anchor=W).grid(
+                    row=row, column=2, sticky="w", padx=(6, 0))
+            entry.bind("<FocusOut>", lambda event: callback("", "", ""))
+            return entry
+
+        Label(machine, text="Modelo da placa", anchor=W).grid(row=0, column=0, sticky="w", pady=3)
+        board_values = ("LASER-M3", "LASER-M2", "LASER-M1", "LASER-M",
+                        "LASER-B2", "LASER-B1", "LASER-B", "LASER-A")
+        self.Board_Name_OptionMenu = OptionMenu(
+            machine, self.board_name, *board_values,
+            command=lambda value: update_board_controls())
+        self.Board_Name_OptionMenu.grid(row=0, column=1, sticky="w", pady=3)
+        Checkbutton(machine, text="Origem no canto superior direito", variable=self.HomeUR,
+                    command=self.menu_View_Refresh, anchor=W).grid(
+                        row=1, column=0, columnspan=3, sticky="w", pady=3)
+        self.Entry_Laser_Area_Width = machine_entry(
+            2, "Largura da área da laser", self.LaserXsize,
+            self.Entry_Laser_Area_Width_Callback, self.units)
+        self.Entry_Laser_Area_Height = machine_entry(
+            3, "Altura da área da laser", self.LaserYsize,
+            self.Entry_Laser_Area_Height_Callback, self.units)
+        self.Entry_Laser_X_Scale = machine_entry(
+            4, "Fator de escala X", self.LaserXscale, self.Entry_Laser_X_Scale_Callback)
+        self.Entry_Laser_Y_Scale = machine_entry(
+            5, "Fator de escala Y", self.LaserYscale, self.Entry_Laser_Y_Scale_Callback)
+
+        m3 = LabelFrame(container, text="Recursos da controladora Laser-M3", padx=10, pady=8)
+        m3.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        m3.columnconfigure(2, weight=1)
+        self.Checkbuttonshow_power = Checkbutton(
+            m3, text="Mostrar configurações de potência", variable=self.show_power,
+            command=self.menu_View_Refresh)
+        self.Checkbuttonshow_power.grid(row=0, column=0, sticky="w")
+        self.Checkbuttonshow_test = Checkbutton(
+            m3, text="Mostrar botão de teste de disparo", variable=self.show_test,
+            command=self.menu_View_Refresh)
+        self.Checkbuttonshow_test.grid(row=0, column=1, sticky="w", padx=(15, 0))
+        self.Label_Max_Power = Label(m3, text="Potência máxima", anchor=W)
+        self.Label_Max_Power.grid(row=1, column=0, sticky="w", pady=(7, 0))
+        self.Entry_Max_Power = Entry(m3, textvariable=self.max_power, width=10, justify=CENTER)
+        self.Entry_Max_Power.grid(row=1, column=1, sticky="w", padx=(15, 0), pady=(7, 0))
+        self.Label_Max_Power_u = Label(
+            m3, text="%  (um valor muito alto pode danificar o tubo laser)", anchor=W)
+        self.Label_Max_Power_u.grid(row=1, column=2, sticky="w", padx=(6, 0), pady=(7, 0))
+        self.Entry_Max_Power.bind(
+            "<FocusOut>", lambda event: self.Entry_Max_Power_Callback("", "", ""))
+
+        m3_widgets = (self.Checkbuttonshow_power, self.Checkbuttonshow_test,
+                      self.Label_Max_Power, self.Entry_Max_Power, self.Label_Max_Power_u)
+
+        def update_board_controls(*unused):
+            state = NORMAL if self.board_name.get() == "LASER-M3" else DISABLED
+            for widget in m3_widgets:
+                widget.configure(state=state)
+            self.menu_View_Refresh()
+
+        update_board_controls()
+
+        footer = Frame(container)
+        footer.grid(row=3, column=0, sticky="ew", pady=(2, 0))
+        Button(footer, text="Salvar configurações", command=self.Save_Auto_Configuration,
+               width=20).pack(side=LEFT)
+        Button(footer, text="Fechar", command=window.destroy, width=14).pack(side=RIGHT)
 
     ################################################################################
     #                          Raster Settings Window                              #
@@ -9285,7 +10108,7 @@ class pxpiDialog(tkSimpleDialog.Dialog):
     
 root = Tk()
 app = Application(root)
-app.master.title(title_text)
+app._update_window_title()
 app.master.iconname("K40")
 app.master.minsize(1020,625)
 app.master.geometry("1020x625")
@@ -9368,6 +10191,11 @@ for option, value in opts:
 if DEBUG:
     import inspect
 debug_message("Debuging is turned on.")
+
+if args:
+    startup_file = os.path.abspath(args[0])
+    if os.path.isfile(startup_file) and startup_file.lower().endswith(".k40p"):
+        app.master.after_idle(lambda path=startup_file: app._open_project_file(path))
 
 if not pi_mode_requested:
     def maximize_main_window():

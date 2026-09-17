@@ -1,3 +1,13 @@
+Version 1.1 (K40 Whisperer PT-BR - DXF refatorado):
+- Added the native DXF pipeline, analytic curves, topology composition and
+  asynchronous import with progress and cancellation.
+- Added native image/raster editing, masks, grayscale dithering and DXF fills.
+- Added procedural arrays with ignored placements and execution either by
+  process or by completing each instance.
+- Added non-destructive vector/image transforms and saved .k40p projects.
+- Added Portuguese/English interface support and the Windows portable/installer
+  packages for this fork.
+
 Version 0.01:
 - Initial Release
 

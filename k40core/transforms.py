@@ -81,4 +81,18 @@ def apply_document_transform(document: JobDocument, transform: AffineTransform) 
         replace(item, transform=compose(transform, item.transform))
         for item in document.fills
     ]
+    document.arrays[:] = [
+        replace(
+            item,
+            reference_bounds=(
+                Bounds.from_points(transform.apply(point) for point in (
+                    Point(item.reference_bounds.min_x, item.reference_bounds.min_y),
+                    Point(item.reference_bounds.min_x, item.reference_bounds.max_y),
+                    Point(item.reference_bounds.max_x, item.reference_bounds.min_y),
+                    Point(item.reference_bounds.max_x, item.reference_bounds.max_y),
+                )) if item.reference_bounds is not None else None
+            ),
+        )
+        for item in document.arrays
+    ]
     document.validate()

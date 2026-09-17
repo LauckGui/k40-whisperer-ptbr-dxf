@@ -12,6 +12,20 @@ from k40core.rasterizer import (
 
 
 class InstanceArrayTests(unittest.TestCase):
+    def test_execution_order_is_explicit_and_validated(self):
+        self.assertEqual(
+            InstanceArray("array", ("part",)).execution_order,
+            "by_process",
+        )
+        self.assertEqual(
+            InstanceArray(
+                "array", ("part",), execution_order="by_instance"
+            ).execution_order,
+            "by_instance",
+        )
+        with self.assertRaises(ValueError):
+            InstanceArray("array", ("part",), execution_order="random")
+
     def test_grid_offsets_include_original_without_cloning_geometry(self):
         array = InstanceArray("array:1", ("part",), columns=3, rows=2,
                               spacing_mm=2.0)
@@ -36,6 +50,32 @@ class InstanceArrayTests(unittest.TestCase):
             (0.0, 0.0), (12.0, 0.0),
             (6.0, 6.0), (18.0, 6.0),
             (0.0, 12.0), (12.0, 12.0),
+        ])
+
+    def test_disabled_instances_are_skipped_but_remain_addressable(self):
+        array = InstanceArray(
+            "array:1", ("part",), columns=3, rows=2, spacing_mm=2.0,
+            disabled_indices=(1, 4),
+        )
+        bounds = Bounds(0, 0, 10, 5)
+
+        self.assertEqual(list(instance_offsets(array, bounds)), [
+            (0.0, 0.0), (24.0, 0.0), (0.0, 7.0), (24.0, 7.0),
+        ])
+        self.assertEqual(len(list(instance_offsets(
+            array, bounds, include_disabled=True
+        ))), 6)
+
+    def test_raster_reference_bounds_can_define_larger_piece_spacing(self):
+        array = InstanceArray(
+            "array:1", ("vector",), columns=2, rows=2, spacing_mm=2.0,
+            reference_bounds=Bounds(-3, -1, 17, 7),
+        )
+
+        offsets = list(instance_offsets(array, Bounds(0, 0, 10, 5)))
+
+        self.assertEqual(offsets, [
+            (0.0, 0.0), (22.0, 0.0), (0.0, 10.0), (22.0, 10.0),
         ])
 
     def test_fill_available_area_respects_staggered_overhang(self):
@@ -78,6 +118,26 @@ class InstanceArrayTests(unittest.TestCase):
         self.assertAlmostEqual(lines[1][0], 15.0/25.4)
         self.assertEqual(document.bounds, Bounds(0, 0, 25, 0))
 
+    def test_ignored_vector_instance_is_not_exported_and_layout_stays_fixed(self):
+        layer = Layer("layer", "Corte")
+        vector = VectorObject(
+            "part", (VectorPath((LineSegment(Point(0, 0), Point(10, 0)),)),),
+            layer.id, Operation.VECTOR_CUT,
+        )
+        document = JobDocument(
+            ImportSource("fixture", "test", "test"), [layer], [vector],
+            arrays=[InstanceArray(
+                "array:1", (vector.id,), columns=2, spacing_mm=5.0,
+                disabled_indices=(0,),
+            )],
+        )
+
+        lines = vector_lines_in_inches(document, Operation.VECTOR_CUT)
+
+        self.assertEqual(len(lines), 1)
+        self.assertAlmostEqual(lines[0][0], 15.0/25.4)
+        self.assertEqual(document.bounds, Bounds(0, 0, 25, 0))
+
     def test_array_repeats_solid_raster_fills(self):
         layer = Layer("layer", "Raster")
         path = VectorPath((
@@ -98,6 +158,9 @@ class InstanceArrayTests(unittest.TestCase):
         self.assertEqual(image.size, (5, 2))
         self.assertEqual(image.getpixel((0, 0)), 0)
         self.assertEqual(image.getpixel((4, 0)), 0)
+
+        source_image = rasterize_fills(document, dpi=25.4, include_arrays=False)
+        self.assertEqual(source_image.size, (2, 2))
 
     def test_large_raster_dpi_is_fitted_to_memory_budget(self):
         bounds = Bounds(0, 0, 500, 286)

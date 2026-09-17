@@ -17,6 +17,11 @@ ENGLISH = {
     "Cancelar": "Cancel",
     "Fechar": "Close",
     "Salvar": "Save",
+    "Novo projeto": "New project",
+    "Abrir projeto": "Open project",
+    "Salvar projeto": "Save project",
+    "Salvar projeto como": "Save project as",
+    "Recarregar arquivo de origem": "Reload source file",
     "Redefinir": "Reset",
     "Configurações": "Settings",
     "Avançado": "Advanced",
@@ -123,6 +128,11 @@ ENGLISH = {
     "Ajuste Y entre linhas (mm)": "Y adjustment between rows (mm)",
     "Preencher área disponível": "Fill available area",
     "Restaurar encaixe padrão": "Restore default nesting",
+    "Concluir cada peça antes da próxima": "Complete each part before the next",
+    "Clique numa peça da prévia para ignorar/reativar.":
+        "Click a preview part to ignore/reactivate it.",
+    "Execução: raster, gravação e corte de cada peça.":
+        "Execution: raster, engraving and cutting for each part.",
     "Remover cópias": "Remove copies",
     "Linhas e colunas precisam ser maiores que zero.": "Rows and columns must be greater than zero.",
     "O limite desta versão é de 10.000 cópias.": "This version is limited to 10,000 copies.",
@@ -178,6 +188,13 @@ ENGLISH = {
     "As alterações são aplicadas imediatamente ao trabalho atual.":
         "Changes are immediately applied to the current job.",
     "Configurações gerais": "General settings",
+    "Configurações gerais e da máquina": "General and machine settings",
+    "Aplicativo e fluxo de trabalho": "Application and workflow",
+    "Após concluir o trabalho": "After completing the job",
+    "Máquina e área de trabalho": "Machine and work area",
+    "Recursos da controladora Laser-M3": "Laser-M3 controller features",
+    "Executar arquivo em lote": "Run batch file",
+    "Salvar configurações": "Save settings",
     "Unidades": "Units",
     "polegadas": "inches",
     "Milímetros": "Millimeters",
@@ -303,6 +320,13 @@ ENGLISH = {
     "O número de tentativas de comunicação deve ser maior que zero":
         "The number of communication attempts must be greater than zero",
     "Resetar configurações": "Reset settings",
+    "Repositório desta versão": "This version repository",
+    "Site do projeto original": "Original project website",
+    "Novo projeto criado.": "New project created.",
+    "Projeto aberto:": "Project opened:",
+    "Projeto salvo:": "Project saved:",
+    "Não foi possível abrir o projeto:": "Could not open project:",
+    "Não foi possível salvar o projeto:": "Could not save project:",
     "Restaurar todas as configurações padrão do K40 Whisperer?":
         "Restore all K40 Whisperer default settings?",
 }

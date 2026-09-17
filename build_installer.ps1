@@ -8,6 +8,13 @@ $workDir = Join-Path $temporaryRoot "work"
 $releaseDir = Join-Path $temporaryRoot "release"
 $installerDir = Join-Path $temporaryRoot "installer"
 $finalOutputDir = Join-Path (Split-Path -Parent $projectDir) "Output"
+$installerDefinition = Join-Path $projectDir "installer\K40Whisperer.iss"
+$versionMatch = Select-String -LiteralPath $installerDefinition `
+    -Pattern '^#define AppVersion "([^"]+)"$' | Select-Object -First 1
+if (-not $versionMatch) {
+    throw "Não foi possível determinar a versão definida no instalador."
+}
+$appVersion = $versionMatch.Matches[0].Groups[1].Value
 
 if (-not (Test-Path -LiteralPath $pythonExe)) {
     & (Join-Path $projectDir "Preparar_Ambiente.bat")
@@ -46,10 +53,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar o instalador Inno Setup." }
 
     New-Item -ItemType Directory -Path $finalOutputDir -Force | Out-Null
+    $portablePath = Join-Path $finalOutputDir `
+        ("K40-Whisperer-Portable-{0}-x64.zip" -f $appVersion)
+    if (Test-Path -LiteralPath $portablePath) {
+        Remove-Item -LiteralPath $portablePath -Force
+    }
+    Compress-Archive -Path (Join-Path $appSource "*") `
+        -DestinationPath $portablePath -CompressionLevel Optimal
     Get-ChildItem -LiteralPath $installerDir -Filter "*.exe" | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $finalOutputDir $_.Name) -Force
     }
-    Write-Host "Instalador criado em $finalOutputDir." -ForegroundColor Green
+    Write-Host "Pacote portátil e instalador criados em $finalOutputDir." -ForegroundColor Green
 }
 finally {
     Pop-Location

@@ -38,7 +38,7 @@ def dpi_for_pixel_budget(bounds: Bounds, requested_dpi: float,
 
 def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = None,
                     maximum_pixels: int = 100_000_000,
-                    color_intensities=None):
+                    color_intensities=None, include_arrays: bool = True):
     """Render all raster-engrave fills to a monochrome Pillow image.
 
     White means laser off and black means laser on, matching the legacy raster
@@ -54,7 +54,12 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
              and item.metadata.get("fill_kind", "solid") == "solid"]
     if not fills:
         return None
-    bounds = bounds or document.bounds
+    base_bounds = Bounds.union(
+        [item.bounds for item in document.vectors]
+        + [item.bounds for item in document.rasters]
+        + [item.bounds for item in document.fills]
+    )
+    bounds = bounds or (document.bounds if include_arrays else base_bounds)
     if bounds is None or bounds.width <= 0 or bounds.height <= 0:
         raise RasterizationError("O preenchimento não possui uma área rasterizável.")
     if dpi <= 0:
@@ -76,10 +81,11 @@ def rasterize_fills(document: JobDocument, dpi: float, bounds: Bounds | None = N
         for item in [*document.vectors, *document.rasters, *document.fills]
     }
     offsets_by_object = {}
-    for array in document.arrays:
-        offsets = tuple(instance_offsets(array, referenced_bounds(array, object_bounds)))
-        for object_id in array.object_ids:
-            offsets_by_object[object_id] = offsets
+    if include_arrays:
+        for array in document.arrays:
+            offsets = tuple(instance_offsets(array, referenced_bounds(array, object_bounds)))
+            for object_id in array.object_ids:
+                offsets_by_object[object_id] = offsets
 
     def resolved_intensity(fill):
         if color_intensities and fill.color is not None:

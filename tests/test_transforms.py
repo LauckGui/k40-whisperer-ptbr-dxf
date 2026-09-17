@@ -59,6 +59,22 @@ class DocumentTransformTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "escala"):
             uniform_scale(0.0, Point(0, 0))
 
+    def test_array_raster_reference_bounds_follow_vector_transform(self):
+        current = self.document.arrays[0]
+        self.document.arrays[0] = InstanceArray(
+            current.id, current.object_ids, columns=2,
+            reference_bounds=Bounds(-5, -2, 15, 12),
+        )
+
+        apply_document_transform(
+            self.document, uniform_scale(2.0, Point(0, 0))
+        )
+
+        self.assertEqual(
+            self.document.arrays[0].reference_bounds,
+            Bounds(-10, -4, 30, 24),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

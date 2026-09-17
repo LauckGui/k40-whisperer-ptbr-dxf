@@ -365,6 +365,9 @@ class InstanceArray:
     mode: str = "grid"
     stagger_x_mm: float = 0.0
     row_adjust_y_mm: float = 0.0
+    disabled_indices: tuple[int, ...] = ()
+    reference_bounds: Optional[Bounds] = None
+    execution_order: str = "by_process"
 
     def __post_init__(self) -> None:
         if not self.object_ids:
@@ -375,12 +378,21 @@ class InstanceArray:
             raise ValueError("Linhas e colunas do array precisam ser positivas.")
         if self.mode not in {"grid", "staggered"}:
             raise ValueError("Modo de array inválido.")
+        if self.execution_order not in {"by_process", "by_instance"}:
+            raise ValueError("Ordem de execução do array inválida.")
         if not all(math.isfinite(value) for value in (
             self.spacing_mm, self.stagger_x_mm, self.row_adjust_y_mm
         )):
             raise ValueError("Parâmetros do array precisam ser finitos.")
         if self.spacing_mm < 0.0:
             raise ValueError("O espaçamento do array não pode ser negativo.")
+        if len(self.disabled_indices) != len(set(self.disabled_indices)):
+            raise ValueError("Uma instância ignorada só pode aparecer uma vez.")
+        if any(index < 0 or index >= self.columns*self.rows
+               for index in self.disabled_indices):
+            raise ValueError("Índice de instância ignorada fora do array.")
+        if len(self.disabled_indices) >= self.columns*self.rows:
+            raise ValueError("O array precisa manter ao menos uma instância ativa.")
 
 
 @dataclass

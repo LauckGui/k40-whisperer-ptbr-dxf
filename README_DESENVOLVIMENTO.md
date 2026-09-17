@@ -27,6 +27,26 @@ hardware. Toda geometria é normalizada para milímetros, enquanto unidade,
 camada, identificador, tipo e atributos originais permanecem rastreáveis. O
 modelo admite caminhos vetoriais e imagens raster posicionadas fisicamente.
 
+## Projetos de produção
+
+O formato `.k40p` é um arquivo ZIP versionado e autocontido. Ele guarda o
+documento canônico, curvas analíticas, arrays procedurais, imagens e máscaras,
+alinhamento, posição na mesa, parâmetros dos processos e coordenadas já
+calculadas. O manifesto usa JSON e os bitmaps são incorporados como PNG; não há
+desserialização executável por `pickle`.
+
+As opções **Novo**, **Abrir**, **Salvar** e **Salvar como** ficam no menu
+Arquivo. Preferências globais da máquina continuam no arquivo de configuração
+do aplicativo e apenas os parâmetros ligados à produção são restaurados por um
+projeto.
+
+Raster de preenchimentos DXF e imagens anexadas a peças com múltiplas cópias
+permanecem como um único bitmap fonte. A prévia reutiliza essa imagem e as
+rotas raster são calculadas uma vez, depois instanciadas pelos deslocamentos do
+array. Assim, a memória de pixels não cresce com o número de peças e o
+grayscale continua alinhado aos vetores. Posições podem ser ignoradas ou
+reativadas com um clique na prévia do array, sem explodir as instâncias.
+
 ## Verificação sem equipamento
 
 Os comandos abaixo não devem conectar nem enviar dados à máquina laser:
@@ -47,7 +67,8 @@ desinstalador.
 1. Instale o Inno Setup 6 uma vez no computador de desenvolvimento:
    `winget install --id JRSoftware.InnoSetup -e`
 2. Execute `Construir_Instalador.bat`.
-3. O resultado será criado na pasta `Output`, ao lado do repositório.
+3. O instalador e o pacote portátil ZIP serão criados na pasta `Output`, ao
+   lado do repositório.
 
 O script instala a versão fixada do PyInstaller no ambiente virtual local,
 executa todos os testes e interrompe o build se qualquer teste falhar.

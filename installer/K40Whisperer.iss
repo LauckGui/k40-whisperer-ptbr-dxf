@@ -1,5 +1,5 @@
 #define AppName "K40 Whisperer"
-#define AppVersion "0.71.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "K40 Whisperer"
 #define AppExeName "K40 Whisperer.exe"
 #ifndef AppSource
@@ -41,6 +41,12 @@ Source: "{#AppSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\.k40p"; ValueType: string; ValueData: "K40Whisperer.Project"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\K40Whisperer.Project"; ValueType: string; ValueData: "Projeto do K40 Whisperer"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\K40Whisperer.Project\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExeName},0"
+Root: HKCU; Subkey: "Software\Classes\K40Whisperer.Project\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExeName}"" ""%1"""
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Executar {#AppName}"; Flags: nowait postinstall skipifsilent
