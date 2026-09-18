@@ -1,6 +1,8 @@
 Version 1.1.1 (K40 Whisperer PT-BR - DXF refatorado):
 - Fixed cumulative raster/vector alignment drift when completing each array
   instance before starting the next one.
+- Restored array execution from the placement nearest the configured upper
+  machine origin instead of starting from the farthest row.
 - Fixed USB backend packaging in the Windows distribution.
 - Fixed vector-only procedural arrays incorrectly requiring raster DPI.
 - Improved staggered-array integer controls and 1 mm X/Y adjustment steps.

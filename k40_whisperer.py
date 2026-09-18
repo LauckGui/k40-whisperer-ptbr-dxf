@@ -40,8 +40,10 @@ from k40core.coordinates import display_y, origin_for_reference
 from k40core.arrays import (array_steps, converted_mode_counts,
                             instance_array_bounds, instance_offsets,
                             maximum_array_counts, referenced_bounds)
-from k40core.execution import (document_instance_offsets, split_repeated_ecoords,
-                               standalone_egv_jobs, translate_ecoords)
+from k40core.execution import (document_instance_offsets,
+                               origin_ordered_instance_offsets,
+                               split_repeated_ecoords, standalone_egv_jobs,
+                               translate_ecoords)
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import AffineTransform, Bounds, InstanceArray, Operation, Point
 from k40core.transforms import (apply_document_transform, editable_bounds,
@@ -5626,9 +5628,12 @@ class Application(Frame):
         if array.execution_order != "by_instance":
             return False
 
-        placements = document_instance_offsets(document)
-        if not placements:
+        source_placements = document_instance_offsets(document)
+        if not source_placements:
             return False
+        placements = origin_ordered_instance_offsets(
+            document, home_on_right=bool(self.HomeUR.get())
+        )
 
         self.statusMessage.set("Preparando EGV procedural por instância...")
         self.master.update()
@@ -5653,11 +5658,16 @@ class Application(Frame):
             vector_bases[name] = coordinates.ecoords
 
         raster_chunks = ()
+        raster_chunks_by_grid_index = {}
         if "Raster_Eng" in operation_type and self.RengData.ecoords:
             raster_count = len(self._raster_instance_offsets_mm())
             raster_chunks = split_repeated_ecoords(
                 self.RengData.ecoords, raster_count
             )
+            raster_chunks_by_grid_index = {
+                placement[0]: chunk
+                for placement, chunk in zip(source_placements, raster_chunks)
+            }
 
         if not vector_bases and not raster_chunks:
             return False
@@ -5705,12 +5715,13 @@ class Application(Frame):
                 (placement_position + 1, len(placements))
             )
             self.master.update()
-            if raster_chunks and placement_position < len(raster_chunks):
+            raster_chunk = raster_chunks_by_grid_index.get(grid_index)
+            if raster_chunk:
                 raster_step = self.get_raster_step_1000in()
                 if not self.engraveUP.get():
                     raster_step = -raster_step
                 segment = make_segment(
-                    raster_chunks[placement_position],
+                    raster_chunk,
                     float(self.Reng_feed.get()) * feed_factor,
                     raster_step=raster_step,
                     raster=True,

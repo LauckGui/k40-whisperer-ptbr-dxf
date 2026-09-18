@@ -2,7 +2,7 @@ import unittest
 
 from k40core.execution import (
     document_instance_offsets, indexed_instance_offsets, split_repeated_ecoords,
-    standalone_egv_jobs, translate_ecoords,
+    origin_ordered_instance_offsets, standalone_egv_jobs, translate_ecoords,
 )
 from k40core.model import (
     Bounds, ImportSource, InstanceArray, JobDocument, Layer, LineSegment,
@@ -38,6 +38,31 @@ class ArrayExecutionTests(unittest.TestCase):
         self.assertEqual(document_instance_offsets(document), (
             (0, 0.0, 0.0), (1, 15.0, 0.0),
         ))
+
+    def test_execution_starts_at_upper_machine_origin(self):
+        layer = Layer("layer", "Cut")
+        vector = VectorObject(
+            "part", (VectorPath((LineSegment(Point(0, 0), Point(10, 0)),)),),
+            layer.id, Operation.VECTOR_CUT,
+        )
+        document = JobDocument(
+            ImportSource("fixture", "test", "test"), [layer], [vector],
+            arrays=[InstanceArray(
+                "array", (vector.id,), columns=3, rows=2, spacing_mm=1,
+                disabled_indices=(4,), reference_bounds=Bounds(0, 0, 10, 5),
+            )],
+        )
+
+        self.assertEqual(
+            [item[0] for item in origin_ordered_instance_offsets(document)],
+            [3, 5, 0, 1, 2],
+        )
+        self.assertEqual(
+            [item[0] for item in origin_ordered_instance_offsets(
+                document, home_on_right=True
+            )],
+            [5, 3, 2, 1, 0],
+        )
 
     def test_translate_does_not_mutate_cached_base(self):
         base = [[1.0, 2.0, 4], [3.0, 5.0, 4]]

@@ -51,7 +51,7 @@ as instâncias ainda precisam ser transmitidos integralmente à máquina.
 
 ## Estado da versão 1.1.1
 
-- 109 testes automatizados aprovados;
+- 110 testes automatizados aprovados;
 - inicialização da aplicação-fonte e do executável empacotado verificada;
 - instalador e pacote portátil publicados;
 - validação física completa na máquina K40 prevista como próxima etapa.

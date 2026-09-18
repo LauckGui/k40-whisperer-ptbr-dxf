@@ -34,6 +34,40 @@ def document_instance_offsets(document: JobDocument):
     return indexed_instance_offsets(array, referenced_bounds(array, object_bounds))
 
 
+def origin_ordered_instance_offsets(document: JobDocument,
+                                    home_on_right: bool = False):
+    """Order active placements from the machine-side top corner.
+
+    Model Y grows upward, while the K40 work-area origin is on the upper edge.
+    Raw row order therefore starts at the physically farthest row.  Execution
+    reverses that vertical order and traverses each row away from the selected
+    upper-left/upper-right home without changing stable grid indices.
+    """
+    placements = document_instance_offsets(document)
+    if not document.arrays or len(placements) < 2:
+        return placements
+    array = document.arrays[0]
+    object_bounds = {
+        item.id: item.bounds
+        for item in [*document.vectors, *document.rasters, *document.fills]
+    }
+    bounds = referenced_bounds(array, object_bounds)
+    all_offsets = tuple(instance_offsets(array, bounds, include_disabled=True))
+    top = max(bounds.max_y + dy for dx, dy in all_offsets)
+    if home_on_right:
+        side = max(bounds.max_x + dx for dx, dy in all_offsets)
+    else:
+        side = min(bounds.min_x + dx for dx, dy in all_offsets)
+
+    def order_key(placement):
+        index, dx, dy = placement
+        row_distance = top - (bounds.max_y + dy)
+        edge = bounds.max_x + dx if home_on_right else bounds.min_x + dx
+        return row_distance, abs(edge-side), index
+
+    return tuple(sorted(placements, key=order_key))
+
+
 def translate_ecoords(ecoords, dx_inches: float, dy_inches: float):
     """Translate legacy ECoords without mutating the cached base geometry."""
     return [
