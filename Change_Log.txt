@@ -1,3 +1,10 @@
+Version 1.1.1 (K40 Whisperer PT-BR - DXF refatorado):
+- Fixed USB backend packaging in the Windows distribution.
+- Fixed vector-only procedural arrays incorrectly requiring raster DPI.
+- Improved staggered-array integer controls and 1 mm X/Y adjustment steps.
+- Replaced heavy array preview geometry with a lightweight source outline.
+- Fixed the array outline orientation to match the main work-area preview.
+
 Version 1.1 (K40 Whisperer PT-BR - DXF refatorado):
 - Added the native DXF pipeline, analytic curves, topology composition and
   asynchronous import with progress and cancellation.

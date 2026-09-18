@@ -8,9 +8,9 @@ arrays procedurais.
 
 ## Download para Windows
 
-- **[Baixar o instalador final da versão 1.1](https://github.com/LauckGui/k40-whisperer-ptbr-dxf/releases/download/v1.1.0/K40-Whisperer-Setup-1.1.0-x64.exe)**
-- [Baixar a versão portátil em ZIP](https://github.com/LauckGui/k40-whisperer-ptbr-dxf/releases/download/v1.1.0/K40-Whisperer-Portable-1.1.0-x64.zip)
-- [Ver notas completas e arquivos da versão 1.1](https://github.com/LauckGui/k40-whisperer-ptbr-dxf/releases/tag/v1.1.0)
+- **[Baixar o instalador final da versão 1.1.1](https://github.com/LauckGui/k40-whisperer-ptbr-dxf/releases/download/v1.1.1/K40-Whisperer-Setup-1.1.1-x64.exe)**
+- [Baixar a versão portátil em ZIP](https://github.com/LauckGui/k40-whisperer-ptbr-dxf/releases/download/v1.1.1/K40-Whisperer-Portable-1.1.1-x64.zip)
+- [Ver notas completas e arquivos da versão 1.1.1](https://github.com/LauckGui/k40-whisperer-ptbr-dxf/releases/tag/v1.1.1)
 
 O instalador inclui a aplicação e suas dependências Python. O driver USB
 compatível com a controladora K40 continua sendo necessário, assim como na
@@ -49,9 +49,9 @@ A controladora Nano M2 não oferece subrotinas ou loops no protocolo EGV. Por
 isso, embora a preparação geométrica seja reutilizada, os movimentos de todas
 as instâncias ainda precisam ser transmitidos integralmente à máquina.
 
-## Estado da versão 1.1
+## Estado da versão 1.1.1
 
-- 99 testes automatizados aprovados;
+- 108 testes automatizados aprovados;
 - inicialização da aplicação-fonte e do executável empacotado verificada;
 - instalador e pacote portátil publicados;
 - validação física completa na máquina K40 prevista como próxima etapa.

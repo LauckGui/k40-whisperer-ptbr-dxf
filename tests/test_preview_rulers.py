@@ -1,10 +1,37 @@
 import unittest
 
-from k40core.preview import (model_origin_canvas, rectangular_trace,
+from k40core.model import Bounds
+from k40core.preview import (array_outline_canvas, model_origin_canvas, rectangular_trace,
                              ruler_step, ruler_values)
 
 
 class PreviewRulerTests(unittest.TestCase):
+    def test_array_outline_matches_canvas_axis_orientation(self):
+        bounds = Bounds(10.0, -20.0, 30.0, 0.0)
+        self.assertEqual(
+            array_outline_canvas(10.0, -20.0, 0.0, 0.0, bounds,
+                                 100.0, 50.0, 2.0),
+            (100.0, 60.0),
+        )
+        self.assertEqual(
+            array_outline_canvas(30.0, 0.0, 0.0, 0.0, bounds,
+                                 100.0, 50.0, 2.0),
+            (110.0, 50.0),
+        )
+
+    def test_array_outline_respects_upper_right_machine_origin(self):
+        bounds = Bounds(10.0, -20.0, 30.0, 0.0)
+        self.assertEqual(
+            array_outline_canvas(10.0, -20.0, 0.0, 0.0, bounds,
+                                 100.0, 50.0, 2.0, home_on_right=True),
+            (110.0, 60.0),
+        )
+        self.assertEqual(
+            array_outline_canvas(30.0, 0.0, 0.0, 0.0, bounds,
+                                 100.0, 50.0, 2.0, home_on_right=True),
+            (100.0, 50.0),
+        )
+
     def test_nice_metric_step(self):
         self.assertEqual(ruler_step(325), 50.0)
 

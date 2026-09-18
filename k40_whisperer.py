@@ -17,7 +17,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-version = '1.1'
+version = '1.1.1'
 title_text = "K40 Whisperer V"+version
 
 import sys
@@ -46,8 +46,8 @@ from k40core.legacy import vector_lines_in_inches
 from k40core.model import AffineTransform, Bounds, InstanceArray, Operation, Point
 from k40core.transforms import (apply_document_transform, editable_bounds,
                                 reflection, rotation, uniform_scale)
-from k40core.preview import (iter_preview_polylines, model_origin_canvas,
-                             rectangular_trace, ruler_values,
+from k40core.preview import (array_outline_canvas, iter_preview_polylines,
+                             model_origin_canvas, rectangular_trace, ruler_values,
                              transparent_raster_preview)
 from k40core.rasterizer import (dpi_for_pixel_budget, raster_dpi_for_rebuild,
                                 rasterize_fills)
@@ -8117,16 +8117,25 @@ class Application(Frame):
                 )
                 shown = list(enumerate(offsets[:500]))
                 for instance_index, (offset_x, offset_y) in shown:
-                    x0 = area_left+(base_bounds.min_x+offset_x-result_bounds.min_x)/scale
-                    y0 = area_top+(base_bounds.min_y+offset_y-result_bounds.min_y)/scale
-                    x1 = area_left+(base_bounds.max_x+offset_x-result_bounds.min_x)/scale
-                    y1 = area_top+(base_bounds.max_y+offset_y-result_bounds.min_y)/scale
+                    corner_a = array_outline_canvas(
+                        base_bounds.min_x, base_bounds.min_y, offset_x, offset_y,
+                        result_bounds, area_left, area_top, scale,
+                        home_on_right=bool(self.HomeUR.get()),
+                    )
+                    corner_b = array_outline_canvas(
+                        base_bounds.max_x, base_bounds.max_y, offset_x, offset_y,
+                        result_bounds, area_left, area_top, scale,
+                        home_on_right=bool(self.HomeUR.get()),
+                    )
+                    x0, x1 = sorted((corner_a[0], corner_b[0]))
+                    y0, y1 = sorted((corner_a[1], corner_b[1]))
                     ignored = instance_index in disabled_indices
                     outline = []
                     for point_x, point_y in source_outline:
-                        outline.extend((
-                            area_left+(point_x+offset_x-result_bounds.min_x)/scale,
-                            area_top+(point_y+offset_y-result_bounds.min_y)/scale,
+                        outline.extend(array_outline_canvas(
+                            point_x, point_y, offset_x, offset_y,
+                            result_bounds, area_left, area_top, scale,
+                            home_on_right=bool(self.HomeUR.get()),
                         ))
                     preview.create_polygon(
                         *outline,

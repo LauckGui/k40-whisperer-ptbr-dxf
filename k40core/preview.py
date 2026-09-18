@@ -56,6 +56,25 @@ def model_origin_canvas(x_left, y_top, x_right, plot_scale,
     return x, y_top-position_y/plot_scale
 
 
+def array_outline_canvas(point_x, point_y, offset_x, offset_y, bounds,
+                         area_left, area_top, plot_scale,
+                         home_on_right=False):
+    """Project a procedural-array outline point onto its preview canvas.
+
+    Model Y grows upwards while Tk canvas Y grows downwards. Machines homed
+    on the upper-right also display X from right to left, matching the main
+    work-area preview and its ruler.
+    """
+    model_x = float(point_x) + float(offset_x)
+    model_y = float(point_y) + float(offset_y)
+    if home_on_right:
+        canvas_x = area_left + (bounds.max_x-model_x)/plot_scale
+    else:
+        canvas_x = area_left + (model_x-bounds.min_x)/plot_scale
+    canvas_y = area_top + (bounds.max_y-model_y)/plot_scale
+    return canvas_x, canvas_y
+
+
 def transparent_raster_preview(image, size, alpha=None):
     """Return a black RGBA overlay where white/off and masked pixels are transparent."""
     from PIL import Image, ImageOps, ImageChops
