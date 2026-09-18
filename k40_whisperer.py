@@ -37,7 +37,8 @@ from modern_importers import import_dxf
 from k40core.configuration import (ConfigurationError, configuration_path,
                                    load_configuration, save_configuration)
 from k40core.coordinates import display_y, origin_for_reference
-from k40core.arrays import (array_steps, instance_array_bounds, instance_offsets,
+from k40core.arrays import (array_steps, converted_mode_counts,
+                            instance_array_bounds, instance_offsets,
                             maximum_array_counts, referenced_bounds)
 from k40core.execution import (document_instance_offsets, split_repeated_ecoords,
                                translate_ecoords)
@@ -7974,6 +7975,33 @@ class Application(Frame):
         disabled_indices = set(existing.disabled_indices if existing else ())
         summary = StringVar()
         warning = StringVar()
+        previous_mode = [mode.get()]
+
+        source_outline_points = []
+        for operation in (Operation.VECTOR_CUT, Operation.VECTOR_ENGRAVE):
+            for line in vector_lines_in_inches(
+                    document, operation, tolerance_mm=0.25,
+                    include_arrays=False):
+                source_outline_points.extend((
+                    (line[0]*25.4, line[1]*25.4),
+                    (line[2]*25.4, line[3]*25.4),
+                ))
+        raster_bounds = self._effective_raster_content_bounds_mm()
+        if raster_bounds is not None:
+            source_outline_points.extend((
+                (raster_bounds.min_x, raster_bounds.min_y),
+                (raster_bounds.min_x, raster_bounds.max_y),
+                (raster_bounds.max_x, raster_bounds.min_y),
+                (raster_bounds.max_x, raster_bounds.max_y),
+            ))
+        source_outline = hull2D().convex_hull(source_outline_points)
+        if len(source_outline) < 3:
+            source_outline = [
+                (base_bounds.min_x, base_bounds.min_y),
+                (base_bounds.max_x, base_bounds.min_y),
+                (base_bounds.max_x, base_bounds.max_y),
+                (base_bounds.min_x, base_bounds.max_y),
+            ]
 
         container = Frame(copies, padx=12, pady=10)
         container.pack(fill=BOTH, expand=1)
@@ -8008,6 +8036,11 @@ class Application(Frame):
                 entry = Spinbox(
                     values, textvariable=variable, from_=1, to=10000,
                     increment=1, justify=RIGHT, width=7,
+                )
+            elif index in (3, 4):
+                entry = Spinbox(
+                    values, textvariable=variable, from_=-10000, to=10000,
+                    increment=1, justify=RIGHT, width=10,
                 )
             else:
                 entry = Entry(values, textvariable=variable, justify=RIGHT, width=10)
@@ -8089,8 +8122,14 @@ class Application(Frame):
                     x1 = area_left+(base_bounds.max_x+offset_x-result_bounds.min_x)/scale
                     y1 = area_top+(base_bounds.max_y+offset_y-result_bounds.min_y)/scale
                     ignored = instance_index in disabled_indices
-                    preview.create_rectangle(
-                        x0, y0, x1, y1,
+                    outline = []
+                    for point_x, point_y in source_outline:
+                        outline.extend((
+                            area_left+(point_x+offset_x-result_bounds.min_x)/scale,
+                            area_top+(point_y+offset_y-result_bounds.min_y)/scale,
+                        ))
+                    preview.create_polygon(
+                        *outline,
                         fill="#d1d5db" if ignored else "#fff7f7",
                         outline="#6b7280" if ignored else "#b42318",
                         width=2 if ignored else 1,
@@ -8180,6 +8219,24 @@ class Application(Frame):
                 return
             refresh_preview()
 
+        def change_mode(*unused):
+            new_mode = mode.get()
+            old_mode = previous_mode[0]
+            if new_mode == old_mode:
+                refresh_preview()
+                return
+            try:
+                converted = converted_mode_counts(
+                    int(columns.get()), int(rows.get()), old_mode, new_mode,
+                )
+                columns.set(str(converted[0]))
+                rows.set(str(converted[1]))
+                disabled_indices.clear()
+            except ValueError:
+                pass
+            previous_mode[0] = new_mode
+            refresh_preview()
+
         preview.bind("<Button-1>", toggle_instance)
 
         def apply():
@@ -8209,7 +8266,8 @@ class Application(Frame):
             side=RIGHT, padx=6)
         Button(controls, text="Remover cópias", width=14, command=remove).pack(side=RIGHT)
 
-        for variable in (mode, columns, rows, spacing, stagger_x, row_adjust_y,
+        trace_variable(mode, change_mode)
+        for variable in (columns, rows, spacing, stagger_x, row_adjust_y,
                          complete_each_instance):
             trace_variable(variable, refresh_preview)
         refresh_preview()

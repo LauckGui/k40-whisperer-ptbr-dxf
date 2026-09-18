@@ -1,6 +1,7 @@
 import unittest
 
-from k40core.arrays import instance_offsets, maximum_array_counts
+from k40core.arrays import (converted_mode_counts, instance_offsets,
+                            maximum_array_counts)
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import (
     Bounds, FillObject, ImportSource, InstanceArray, JobDocument, Layer, LineSegment,
@@ -13,6 +14,11 @@ from k40core.rasterizer import (
 
 
 class InstanceArrayTests(unittest.TestCase):
+    def test_zigzag_mode_uses_doubled_integer_counts(self):
+        self.assertEqual(converted_mode_counts(3, 2, "grid", "staggered"), (6, 4))
+        self.assertEqual(converted_mode_counts(6, 4, "staggered", "grid"), (3, 2))
+        self.assertEqual(converted_mode_counts(5, 3, "staggered", "grid"), (3, 2))
+
     def test_execution_order_is_explicit_and_validated(self):
         self.assertEqual(
             InstanceArray("array", ("part",)).execution_order,
@@ -118,6 +124,24 @@ class InstanceArrayTests(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertAlmostEqual(lines[1][0], 15.0/25.4)
         self.assertEqual(document.bounds, Bounds(0, 0, 25, 0))
+
+    def test_legacy_can_return_only_source_geometry_for_lightweight_preview(self):
+        layer = Layer("layer", "Corte")
+        vector = VectorObject(
+            "part", (VectorPath((LineSegment(Point(0, 0), Point(10, 0)),)),),
+            layer.id, Operation.VECTOR_CUT,
+        )
+        document = JobDocument(
+            ImportSource("fixture", "test", "test"), [layer], [vector],
+            arrays=[InstanceArray("array:1", (vector.id,), columns=20, rows=20)],
+        )
+
+        lines = vector_lines_in_inches(
+            document, Operation.VECTOR_CUT, include_arrays=False,
+        )
+
+        self.assertEqual(len(lines), 1)
+        self.assertAlmostEqual(lines[0][2], 10.0/25.4)
 
     def test_ignored_vector_instance_is_not_exported_and_layout_stays_fixed(self):
         layer = Layer("layer", "Corte")

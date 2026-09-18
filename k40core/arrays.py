@@ -7,6 +7,19 @@ import math
 from .model import Bounds, InstanceArray
 
 
+def converted_mode_counts(columns: int, rows: int, previous_mode: str,
+                          new_mode: str) -> tuple[int, int]:
+    """Convert UI counts when entering/leaving the half-offset zig-zag mode."""
+    columns, rows = max(1, int(columns)), max(1, int(rows))
+    if previous_mode == new_mode:
+        return columns, rows
+    if previous_mode == "grid" and new_mode == "staggered":
+        return columns*2, rows*2
+    if previous_mode == "staggered" and new_mode == "grid":
+        return max(1, (columns+1)//2), max(1, (rows+1)//2)
+    return columns, rows
+
+
 def referenced_bounds(array: InstanceArray, object_bounds: dict[str, Bounds | None]) -> Bounds:
     if array.reference_bounds is not None:
         return array.reference_bounds

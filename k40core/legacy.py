@@ -7,7 +7,8 @@ from .topology import stitch_line_segments, transform_segment
 
 
 def vector_lines_in_inches(document: JobDocument, operation: Operation,
-                           tolerance_mm: float = 0.0127) -> list[list[float]]:
+                           tolerance_mm: float = 0.0127,
+                           include_arrays: bool = True) -> list[list[float]]:
     """Retorna linhas no formato [x0, y0, x1, y1] esperado por ECoord."""
     lines = []
     visible_layers = {layer.id for layer in document.layers if layer.visible}
@@ -17,10 +18,11 @@ def vector_lines_in_inches(document: JobDocument, operation: Operation,
         for item in [*document.vectors, *document.rasters, *document.fills]
     }
     offsets_by_object = {}
-    for array in document.arrays:
-        offsets = tuple(instance_offsets(array, referenced_bounds(array, object_bounds)))
-        for object_id in array.object_ids:
-            offsets_by_object[object_id] = offsets
+    if include_arrays:
+        for array in document.arrays:
+            offsets = tuple(instance_offsets(array, referenced_bounds(array, object_bounds)))
+            for object_id in array.object_ids:
+                offsets_by_object[object_id] = offsets
     for vector in document.vectors:
         if vector.operation is not operation or not vector.style.visible or vector.layer_id not in visible_layers:
             continue
