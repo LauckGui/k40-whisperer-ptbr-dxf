@@ -21,7 +21,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 try:
     import usb.core
     import usb.util
-    import usb.backend.libusb0
 except:
     print("Unable to load USB library (Sending data to Laser will not work.)")
 import sys
@@ -31,6 +30,7 @@ from shutil import copyfile
 from egv import egv
 import traceback
 from windowsinhibitor import WindowsInhibitor
+from k40core.usb_backend import find_usb_device, get_usb_backend
 from time import time
 import time as t
 
@@ -354,16 +354,19 @@ class K40_CLASS:
         except:
             pass
 
-        backend  = usb.backend.libusb0.get_backend()
-        if backend==None and os.name == 'nt':
-            exedir = os.path.dirname(sys.executable)
-            os.environ['PATH'] = exedir + os.pathsep + os.environ['PATH']
+        backend = get_usb_backend()
+        if backend is None:
+            raise RuntimeError(
+                "No USB backend available. The packaged libusb library could not be loaded."
+            )
             
         # Find a laser device
         self.dev = None
         laser_cnt=0
+        device_error = None
         if USB_Location == None:
-            for device in usb.core.find(idVendor=0x1a86, idProduct=0x5512, find_all=True):
+            for device in find_usb_device(
+                    idVendor=0x1a86, idProduct=0x5512, find_all=True):
                 self.dev=device
                 try:
                     # detach device from linux kernel driver
@@ -374,16 +377,24 @@ class K40_CLASS:
                     if (self.say_hello()!=None):
                         self.USB_Location = (self.dev.bus,self.dev.address)
                         break
-                except:
+                except Exception as error:
+                    device_error = error
                     self.dev = None
         else:
-            self.dev = usb.core.find(idVendor=0x1a86, idProduct=0x5512, bus=USB_Location[0], address=USB_Location[1])
+            self.dev = find_usb_device(
+                idVendor=0x1a86,
+                idProduct=0x5512,
+                bus=USB_Location[0],
+                address=USB_Location[1],
+            )
             #  detach device from linux kernel driver
             self.detach_ch341_kernel_driver(device=self.dev)
             self.dev.set_configuration()
             self.USB_Location = (self.dev.bus,self.dev.address)
         
         if self.dev is None:
+            if device_error is not None:
+                raise device_error
             raise Exception("Laser USB Device not found. (libUSB driver may not be installed)")
 
         if verbose:

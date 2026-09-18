@@ -27,7 +27,7 @@ if errorlevel 1 goto :erro
 "%PYTHON_EXE%" -m pip install -r requirements.txt
 if errorlevel 1 goto :erro
 
-"%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf, cairosvg; print('Ambiente K40 pronto:', __import__('sys').executable)"
+"%PYTHON_EXE%" -c "import lxml, usb, PIL, pyclipper, ezdxf, cairosvg, libusb_package; from k40core.usb_backend import get_usb_backend; assert get_usb_backend() is not None; print('Ambiente K40 pronto:', __import__('sys').executable)"
 if errorlevel 1 goto :erro
 
 popd

@@ -6277,8 +6277,8 @@ class Application(Frame):
     def Laser_Board_Detected(self):
         """Detecta a controladora sem configurá-la ou enviar comandos."""
         try:
-            import usb.core
-            return usb.core.find(idVendor=0x1a86, idProduct=0x5512) is not None
+            from k40core.usb_backend import find_usb_device
+            return find_usb_device(idVendor=0x1a86, idProduct=0x5512) is not None
         except:
             return False
 

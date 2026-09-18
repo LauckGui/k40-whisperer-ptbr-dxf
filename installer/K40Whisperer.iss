@@ -1,5 +1,5 @@
 #define AppName "K40 Whisperer"
-#define AppVersion "1.1.0"
+#define AppVersion "1.1.1"
 #define AppPublisher "K40 Whisperer"
 #define AppExeName "K40 Whisperer.exe"
 #ifndef AppSource
