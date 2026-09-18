@@ -48,7 +48,8 @@ from k40core.transforms import (apply_document_transform, editable_bounds,
 from k40core.preview import (iter_preview_polylines, model_origin_canvas,
                              rectangular_trace, ruler_values,
                              transparent_raster_preview)
-from k40core.rasterizer import dpi_for_pixel_budget, rasterize_fills
+from k40core.rasterizer import (dpi_for_pixel_budget, raster_dpi_for_rebuild,
+                                rasterize_fills)
 from k40core.raster_processing import (color_intensities_from_document,
                                         dither_image, prepare_grayscale)
 from k40core.raster_paths import extract_scanlines
@@ -160,6 +161,7 @@ class Application(Frame):
         self.preview_line_buffer = None
         self.preview_render_active = False
         self.job_document = None
+        self.input_dpi = 0.0
         self.source_raster_dpi = 0.0
         self.imported_image_source = None
         self.imported_image_filename = None
@@ -205,6 +207,7 @@ class Application(Frame):
         self.Design_bounds = (0,0,0,0)
         self.UI_image = None
         self.job_document = None
+        self.input_dpi = 0.0
         self.source_raster_dpi = 0.0
         self.imported_image_source = None
         self.imported_image_filename = None
@@ -8591,6 +8594,11 @@ class Application(Frame):
         has_attached_bitmap = (
             self.image_alignment is not None and self.RengData.image is not None
         )
+        raster_dpi = raster_dpi_for_rebuild(
+            bool(document.fills), has_attached_bitmap,
+            self.source_raster_dpi, getattr(self, "input_dpi", 0.0),
+        )
+        use_dxf_color_levels = bool(self.raster_dxf_color_levels.get())
 
         def worker():
             try:
@@ -8599,27 +8607,27 @@ class Application(Frame):
                 cut_data, engrave_data = ECoord(), ECoord()
                 cut_data.make_ecoords(cut_lines, scale=1.0)
                 engrave_data.make_ecoords(engrave_lines, scale=1.0)
-                requested_raster_dpi = self.source_raster_dpi or self.input_dpi
-                raster_dpi = requested_raster_dpi
-                if document.fills and not has_attached_bitmap:
+                effective_raster_dpi = raster_dpi
+                if effective_raster_dpi is not None:
                     base_bounds = Bounds.union(item.bounds for item in [
                         *document.vectors, *document.rasters, *document.fills,
                     ])
-                    raster_dpi = dpi_for_pixel_budget(
-                        base_bounds, requested_raster_dpi, 50_000_000
+                    effective_raster_dpi = dpi_for_pixel_budget(
+                        base_bounds, effective_raster_dpi, 50_000_000
                     )
                     raster_image = rasterize_fills(
-                        document, raster_dpi, bounds=base_bounds,
+                        document, effective_raster_dpi, bounds=base_bounds,
                         maximum_pixels=50_000_000, include_arrays=False,
                         color_intensities=(
                             color_intensities_from_document(document)
-                            if self.raster_dxf_color_levels.get() else None
+                            if use_dxf_color_levels else None
                         ),
                     )
                 else:
                     raster_image = None
                 self.array_build_queue.put(
-                    ("complete", (cut_data, engrave_data, raster_image, raster_dpi))
+                    ("complete", (cut_data, engrave_data, raster_image,
+                                  effective_raster_dpi))
                 )
             except Exception as exc:
                 self.array_build_queue.put(("error", exc))
@@ -8661,7 +8669,7 @@ class Application(Frame):
             return
 
         self.VcutData, self.VengData, raster_image, raster_dpi = payload
-        previous_raster_dpi = self.input_dpi
+        previous_raster_dpi = float(getattr(self, "input_dpi", 0.0) or 0.0)
         if raster_image is not None:
             self.RengData.set_image(raster_image)
             self.input_dpi = raster_dpi

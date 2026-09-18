@@ -7,7 +7,8 @@ from k40core.model import (
     Operation, Point, VectorObject, VectorPath,
 )
 from k40core.rasterizer import (
-    dpi_for_pixel_budget, raster_pixel_count, rasterize_fills,
+    dpi_for_pixel_budget, raster_dpi_for_rebuild, raster_pixel_count,
+    rasterize_fills,
 )
 
 
@@ -170,6 +171,16 @@ class InstanceArrayTests(unittest.TestCase):
         self.assertLess(fitted, 1000.0)
         self.assertLessEqual(raster_pixel_count(bounds, fitted), 50_000_000)
         self.assertEqual(dpi_for_pixel_budget(bounds, 300.0, 50_000_000), 300.0)
+
+    def test_vector_only_array_does_not_require_raster_dpi(self):
+        self.assertIsNone(raster_dpi_for_rebuild(False, False))
+        self.assertIsNone(raster_dpi_for_rebuild(False, True))
+
+    def test_fill_array_uses_available_dpi_or_safe_default(self):
+        self.assertEqual(raster_dpi_for_rebuild(True, False, 600.0, 300.0), 600.0)
+        self.assertEqual(raster_dpi_for_rebuild(True, False, 0.0, 300.0), 300.0)
+        self.assertEqual(raster_dpi_for_rebuild(True, False), 254.0)
+        self.assertIsNone(raster_dpi_for_rebuild(True, True, 600.0, 300.0))
 
 
 if __name__ == "__main__":

@@ -12,6 +12,18 @@ class RasterizationError(ValueError):
     pass
 
 
+def raster_dpi_for_rebuild(has_fills: bool, has_attached_bitmap: bool,
+                           source_dpi: float = 0.0, input_dpi: float = 0.0,
+                           default_dpi: float = 254.0) -> float | None:
+    """Resolve DPI only when procedural fills actually need rasterization."""
+    if not has_fills or has_attached_bitmap:
+        return None
+    dpi = float(source_dpi or input_dpi or default_dpi)
+    if dpi <= 0.0:
+        raise RasterizationError("O DPI precisa ser positivo.")
+    return dpi
+
+
 def raster_pixel_count(bounds: Bounds, dpi: float) -> int:
     """Return the pixel count required for physical bounds at the given DPI."""
     if dpi <= 0.0:
