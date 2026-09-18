@@ -51,3 +51,20 @@ def split_repeated_ecoords(ecoords, instance_count: int):
     size = len(ecoords) // instance_count
     return tuple(ecoords[index * size:(index + 1) * size]
                  for index in range(instance_count))
+
+
+def standalone_egv_jobs(chunks):
+    """Wrap operation chunks as independent controller jobs.
+
+    Raster mode can leave controller-side stepping state active until the
+    terminating ``F`` command is processed.  Replacing that terminator with
+    ``@`` is safe when joining the traditional, single raster operation, but
+    not when alternating raster and vector operations for every array item.
+    Keeping every chunk self-contained prevents a residual raster step from
+    shifting the following vector operation and accumulating between pieces.
+    """
+    jobs = []
+    for chunk, passes in chunks:
+        for unused in range(max(0, int(float(passes)))):
+            jobs.append([ord("I"), *chunk])
+    return jobs

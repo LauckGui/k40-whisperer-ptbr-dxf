@@ -41,7 +41,7 @@ from k40core.arrays import (array_steps, converted_mode_counts,
                             instance_array_bounds, instance_offsets,
                             maximum_array_counts, referenced_bounds)
 from k40core.execution import (document_instance_offsets, split_repeated_ecoords,
-                               translate_ecoords)
+                               standalone_egv_jobs, translate_ecoords)
 from k40core.legacy import vector_lines_in_inches
 from k40core.model import AffineTransform, Bounds, InstanceArray, Operation, Point
 from k40core.transforms import (apply_document_transform, editable_bounds,
@@ -5607,14 +5607,6 @@ class Application(Frame):
             feed_factor = 1.0
         return feed_factor
 
-    @staticmethod
-    def _append_egv_chunk(data, chunk, passes=1):
-        """Append self-contained EGV while keeping one continuous job stream."""
-        for unused in range(max(0, int(float(passes)))):
-            if len(data) > 4:
-                data[-4] = ord("@")
-            data.extend(chunk)
-
     def _send_array_by_instance(self, operation_type, output_filename,
                                 startx, starty, flip_x_offset,
                                 rapid_feed, feed_factor):
@@ -5627,6 +5619,7 @@ class Application(Frame):
         """
         document = self.job_document
         if (document is None or not document.arrays or self.display_power
+                or output_filename is not None
                 or "Trace_Eng" in operation_type or "Gcode_Cut" in operation_type):
             return False
         array = document.arrays[0]
@@ -5669,7 +5662,7 @@ class Application(Frame):
         if not vector_bases and not raster_chunks:
             return False
 
-        data = [ord("I")]
+        jobs = []
         board_name = self.board_name.get()
         y_scale = float(self.LaserYscale.get())
         if self.rotary.get():
@@ -5722,7 +5715,9 @@ class Application(Frame):
                     raster_step=raster_step,
                     raster=True,
                 )
-                self._append_egv_chunk(data, segment, self.Reng_passes.get())
+                jobs.extend(standalone_egv_jobs((
+                    (segment, self.Reng_passes.get()),
+                )))
 
             for name, feed_variable, passes_variable in (
                     ("Vector_Eng", self.Veng_feed, self.Veng_passes),
@@ -5734,15 +5729,25 @@ class Application(Frame):
                 segment = make_segment(
                     placed, float(feed_variable.get()) * feed_factor
                 )
-                self._append_egv_chunk(data, segment, passes_variable.get())
+                jobs.extend(standalone_egv_jobs((
+                    (segment, passes_variable.get()),
+                )))
 
-        if len(data) < 4:
+        if not jobs:
             raise Exception("Nenhum dado EGV foi gerado para as instâncias.")
-        if output_filename is not None:
-            self.write_egv_to_file(data, output_filename)
-        else:
-            self.send_egv_data(data, 1, power_level=None)
-            self.menu_View_Refresh()
+        total_jobs = len(jobs)
+        for job_index, job in enumerate(jobs, 1):
+            self.statusMessage.set(
+                "Enviando operação %d de %d; aguardando retorno à origem..." %
+                (job_index, total_jobs)
+            )
+            self.master.update()
+            # A controller finish is a synchronization barrier here.  Without
+            # it, the next job can inherit the raster stepping state/position.
+            self.send_egv_data(
+                job, 1, power_level=None, wait_for_laser=True
+            )
+        self.menu_View_Refresh()
         return True
 
   
@@ -6129,7 +6134,8 @@ class Application(Frame):
             message_box(msg1, msg2)
             debug_message(traceback.format_exc())
 
-    def send_egv_data(self,data,num_passes=1,power_level=None):
+    def send_egv_data(self, data, num_passes=1, power_level=None,
+                      wait_for_laser=None):
         pre_process_CRC        = self.pre_pr_crc.get()
         if self.k40 != None:
             self.k40.timeout       = int(float( self.t_timeout.get()  ))
@@ -6137,7 +6143,12 @@ class Application(Frame):
             time_start = time()
             if (power_level != None):
                 self.k40.set_PWM_register(power_level)
-            self.k40.send_data(data,self.update_gui,self.stop,num_passes,pre_process_CRC, wait_for_laser=self.wait.get())
+            wait_state = (self.wait.get() if wait_for_laser is None
+                          else bool(wait_for_laser))
+            self.k40.send_data(
+                data, self.update_gui, self.stop, num_passes, pre_process_CRC,
+                wait_for_laser=wait_state,
+            )
             self.run_time = time()-time_start
             if DEBUG:
                 print(("Elapsed Time: %.6f" %(time()-time_start)))

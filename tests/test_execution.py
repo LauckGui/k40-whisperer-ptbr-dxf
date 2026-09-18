@@ -2,7 +2,7 @@ import unittest
 
 from k40core.execution import (
     document_instance_offsets, indexed_instance_offsets, split_repeated_ecoords,
-    translate_ecoords,
+    standalone_egv_jobs, translate_ecoords,
 )
 from k40core.model import (
     Bounds, ImportSource, InstanceArray, JobDocument, Layer, LineSegment,
@@ -57,6 +57,19 @@ class ArrayExecutionTests(unittest.TestCase):
         ))
         with self.assertRaises(ValueError):
             split_repeated_ecoords(repeated, 3)
+
+    def test_piece_operations_remain_independent_egv_jobs(self):
+        raster = [ord("V"), ord("F"), ord("N"), ord("S"), ord("E")]
+        vector = [ord("C"), ord("F"), ord("N"), ord("S"), ord("E")]
+
+        jobs = standalone_egv_jobs(((raster, 1), (vector, 2)))
+
+        self.assertEqual(len(jobs), 3)
+        self.assertTrue(all(job[0] == ord("I") for job in jobs))
+        self.assertTrue(all(job[-4:] == [ord("F"), ord("N"), ord("S"), ord("E")]
+                            for job in jobs))
+        self.assertEqual(raster[-4], ord("F"))
+        self.assertIsNot(jobs[1], jobs[2])
 
 
 if __name__ == "__main__":
